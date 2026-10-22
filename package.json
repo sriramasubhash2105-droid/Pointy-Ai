@@ -1,0 +1,30 @@
+{
+  "name": "pointy-ai",
+  "version": "1.0.0",
+  "description": "An AI cursor buddy that lives on your screen — ask in your language, and it points at the answer",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": [
+    "ai",
+    "cursor",
+    "screen-guide",
+    "gnani",
+    "pointy"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "latest"
+  },
+  "dependencies": {
+    "@google/genai": "^2.30.0",
+    "axios": "^1.20.0",
+    "form-data": "^4.0.6",
+    "node-global-key-listener": "^0.2.0",
+    "screenshot-desktop": "^1.15.7"
+  }
+}

@@ -1,0 +1,693 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   POINTY AI — Overlay Stylesheet
+   Premium, glassmorphic design with fluid animations
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* ─── Reset & Base ──────────────────────────────────────────────────── */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  pointer-events: none;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+/* ─── CSS Variables ─────────────────────────────────────────────────── */
+:root {
+  --primary: #7c3aed;
+  --primary-light: #a78bfa;
+  --primary-dark: #5b21b6;
+  --secondary: #2563eb;
+  --accent: #06b6d4;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --surface: rgba(15, 15, 25, 0.85);
+  --surface-light: rgba(30, 30, 50, 0.75);
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --border: rgba(148, 163, 184, 0.15);
+  --glow-primary: rgba(124, 58, 237, 0.5);
+  --glow-accent: rgba(6, 182, 212, 0.5);
+  --ring-color: rgba(124, 58, 237, 0.8);
+  --buddy-size: 48px;
+}
+
+/* ─── Buddy Mascot ──────────────────────────────────────────────────── */
+.buddy {
+  position: fixed;
+  width: var(--buddy-size);
+  height: var(--buddy-size);
+  z-index: 99999;
+  transition: transform 0.15s ease-out;
+  pointer-events: auto;
+  cursor: grab;
+  bottom: 80px;
+  right: 40px;
+}
+
+.buddy-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+  box-shadow:
+    0 4px 20px var(--glow-primary),
+    0 0 40px rgba(124, 58, 237, 0.3),
+    inset 0 2px 4px rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.buddy:hover .buddy-body {
+  transform: scale(1.15);
+  box-shadow:
+    0 6px 30px var(--glow-primary),
+    0 0 60px rgba(124, 58, 237, 0.4),
+    inset 0 2px 4px rgba(255, 255, 255, 0.3);
+}
+
+.buddy-face {
+  position: relative;
+  width: 30px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.buddy-eye {
+  width: 6px;
+  height: 6px;
+  background: white;
+  border-radius: 50%;
+  animation: buddy-blink 4s ease-in-out infinite;
+  position: relative;
+}
+
+.buddy-eye::after {
+  content: '';
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.buddy-mouth {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 4px;
+  border-radius: 0 0 6px 6px;
+  background: rgba(255, 255, 255, 0.6);
+  transition: all 0.3s ease;
+}
+
+.buddy-glow {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow-primary) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: -1;
+}
+
+.buddy-trail {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--primary);
+  opacity: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* ─── Buddy States ──────────────────────────────────────────────────── */
+.buddy.idle .buddy-body {
+  animation: buddy-float 3s ease-in-out infinite;
+}
+
+.buddy.listening .buddy-body {
+  animation: buddy-pulse-listen 1s ease-in-out infinite;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--primary) 100%);
+  box-shadow:
+    0 4px 30px var(--glow-accent),
+    0 0 60px rgba(6, 182, 212, 0.4);
+}
+
+.buddy.listening .buddy-glow {
+  opacity: 0.6;
+  background: radial-gradient(circle, var(--glow-accent) 0%, transparent 70%);
+  animation: glow-pulse 1s ease-in-out infinite;
+}
+
+.buddy.listening .buddy-mouth {
+  width: 12px;
+  height: 8px;
+  border-radius: 50%;
+  animation: buddy-speak 0.5s ease-in-out infinite alternate;
+}
+
+.buddy.thinking .buddy-body {
+  animation: buddy-think 1.5s ease-in-out infinite;
+  background: linear-gradient(135deg, var(--warning) 0%, var(--primary) 100%);
+}
+
+.buddy.thinking .buddy-eye {
+  animation: buddy-think-eyes 1.5s ease-in-out infinite;
+}
+
+.buddy.pointing .buddy-body {
+  animation: none;
+  background: linear-gradient(135deg, var(--success) 0%, var(--accent) 100%);
+  box-shadow:
+    0 4px 30px rgba(16, 185, 129, 0.5),
+    0 0 60px rgba(16, 185, 129, 0.3);
+}
+
+.buddy.pointing .buddy-glow {
+  opacity: 0.5;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.5) 0%, transparent 70%);
+}
+
+.buddy.flying {
+  transition: all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+
+.buddy.flying .buddy-trail {
+  animation: trail-fade 0.8s ease-out;
+}
+
+/* ─── Pointer Cursor ────────────────────────────────────────────────── */
+.pointer {
+  position: fixed;
+  z-index: 99998;
+  pointer-events: none;
+  transition: none;
+  filter: drop-shadow(0 2px 8px var(--glow-primary));
+}
+
+.pointer.animate {
+  transition: left 0.8s cubic-bezier(0.34, 1.56, 0.64, 1),
+              top 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.pointer.hidden {
+  display: none;
+}
+
+/* ─── Target Ring ───────────────────────────────────────────────────── */
+.target-ring {
+  position: fixed;
+  z-index: 99996;
+  pointer-events: none;
+  border-radius: 12px;
+  padding: 6px;
+  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.target-ring.hidden {
+  display: none;
+}
+
+.ring-inner {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  border: 3px solid var(--ring-color);
+  box-shadow:
+    0 0 20px var(--glow-primary),
+    0 0 40px rgba(124, 58, 237, 0.2),
+    inset 0 0 20px rgba(124, 58, 237, 0.1);
+  animation: ring-glow 2s ease-in-out infinite;
+}
+
+.ring-pulse {
+  position: absolute;
+  inset: -6px;
+  border-radius: 16px;
+  border: 2px solid rgba(124, 58, 237, 0.3);
+  animation: ring-expand 2s ease-out infinite;
+}
+
+.ring-label {
+  position: absolute;
+  bottom: -36px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  animation: label-appear 0.5s ease-out 0.5s forwards;
+}
+
+/* ─── Status Panel ──────────────────────────────────────────────────── */
+.status-panel {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99999;
+  background: var(--surface);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  padding: 10px 24px;
+  border-radius: 50px;
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+  pointer-events: auto;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.status-panel.hidden {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-20px);
+  pointer-events: none;
+}
+
+.status-icon {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+.status-panel.listening .status-icon {
+  background: var(--accent);
+}
+
+.status-panel.thinking .status-icon {
+  background: var(--warning);
+  animation: status-spin 1s linear infinite;
+}
+
+.status-panel.pointing .status-icon {
+  background: var(--success);
+  animation: none;
+}
+
+/* ─── Caption Bar ───────────────────────────────────────────────────── */
+.caption-bar {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99997;
+  max-width: 600px;
+  width: auto;
+  pointer-events: none;
+}
+
+.caption-bar.hidden {
+  display: none;
+}
+
+.caption-content {
+  background: var(--surface);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  padding: 14px 24px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: caption-slide-up 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.caption-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+/* ─── Transcript Display ────────────────────────────────────────────── */
+.transcript-display {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99997;
+  background: rgba(6, 182, 212, 0.15);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  padding: 8px 20px;
+  border-radius: 30px;
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  font-size: 13px;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  animation: fade-in 0.3s ease-out;
+}
+
+.transcript-display.hidden {
+  display: none;
+}
+
+.transcript-icon {
+  font-size: 14px;
+  animation: mic-pulse 1s ease-in-out infinite;
+}
+
+/* ─── Text Input ────────────────────────────────────────────────────── */
+.text-input-container {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99999;
+  pointer-events: auto;
+  animation: slide-up 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.text-input-container.hidden {
+  display: none;
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  padding: 8px 10px 8px 18px;
+  border-radius: 50px;
+  border: 1px solid var(--border);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 60px rgba(124, 58, 237, 0.15);
+  transition: border-color 0.3s ease;
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--primary-light);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 60px rgba(124, 58, 237, 0.3);
+}
+
+.input-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+#text-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 15px;
+  font-weight: 400;
+  width: 350px;
+  padding: 6px 0;
+}
+
+#text-input::placeholder {
+  color: var(--text-muted);
+}
+
+.input-submit {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.input-submit:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 16px var(--glow-primary);
+}
+
+/* ─── Step Counter ──────────────────────────────────────────────────── */
+.step-counter {
+  position: fixed;
+  top: 70px;
+  right: 40px;
+  z-index: 99997;
+  background: var(--surface);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 10px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+}
+
+.step-counter.hidden {
+  display: none;
+}
+
+.step-btn {
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-light);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.step-btn:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.step-btn.secondary {
+  opacity: 0.6;
+}
+
+.step-btn.secondary:hover {
+  opacity: 1;
+}
+
+/* ─── Particles ─────────────────────────────────────────────────────── */
+.particles {
+  position: fixed;
+  inset: 0;
+  z-index: 99995;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--primary-light);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@keyframes buddy-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes buddy-blink {
+  0%, 45%, 55%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.1); }
+}
+
+@keyframes buddy-pulse-listen {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+@keyframes buddy-speak {
+  0% { height: 4px; width: 8px; }
+  100% { height: 10px; width: 14px; }
+}
+
+@keyframes buddy-think {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(-5deg) scale(0.95); }
+  50% { transform: rotate(0deg) scale(1.05); }
+  75% { transform: rotate(5deg) scale(0.95); }
+}
+
+@keyframes buddy-think-eyes {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.15); }
+}
+
+@keyframes trail-fade {
+  0% { opacity: 0.4; transform: scale(1); }
+  100% { opacity: 0; transform: scale(2); }
+}
+
+@keyframes ring-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 20px var(--glow-primary),
+      0 0 40px rgba(124, 58, 237, 0.2),
+      inset 0 0 20px rgba(124, 58, 237, 0.1);
+  }
+  50% {
+    box-shadow:
+      0 0 30px var(--glow-primary),
+      0 0 60px rgba(124, 58, 237, 0.35),
+      inset 0 0 30px rgba(124, 58, 237, 0.2);
+  }
+}
+
+@keyframes ring-expand {
+  0% { opacity: 0.6; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+
+@keyframes label-appear {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+@keyframes status-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes caption-slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes mic-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+
+@keyframes particle-float {
+  0% { opacity: 1; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0); }
+}
+
+@keyframes wave-animation {
+  0% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+  100% { transform: scaleY(0.4); }
+}
+
+/* ─── Sound Wave Indicator (for listening state) ────────────────────── */
+.sound-waves {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+}
+
+.sound-wave-bar {
+  width: 3px;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: wave-animation 0.6s ease-in-out infinite;
+}
+
+.sound-wave-bar:nth-child(1) { animation-delay: 0s; }
+.sound-wave-bar:nth-child(2) { animation-delay: 0.1s; }
+.sound-wave-bar:nth-child(3) { animation-delay: 0.2s; }
+.sound-wave-bar:nth-child(4) { animation-delay: 0.3s; }
+.sound-wave-bar:nth-child(5) { animation-delay: 0.15s; }
