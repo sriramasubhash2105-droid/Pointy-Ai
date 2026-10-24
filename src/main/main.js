@@ -1,39 +1,115 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, globalShortcut, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, globalShortcut, nativeImage, session, desktopCapturer } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const screenshot = require('screenshot-desktop');
+
+const LOG_FILE = path.join(__dirname, '../../pointy.log');
+function logToFile(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  console.log(`[Pointy] ${msg}`);
+  try {
+    fs.appendFileSync(LOG_FILE, line, 'utf8');
+  } catch (_) {}
+}
+
+// Load environment variables from .env file if present
+function loadEnv() {
+  const envPath = path.join(__dirname, '../../.env');
+  if (fs.existsSync(envPath)) {
+    try {
+      const content = fs.readFileSync(envPath, 'utf8');
+      content.split(/\r?\n/).forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx !== -1) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          let val = trimmed.slice(eqIdx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      });
+      console.log('[Pointy] Loaded environment from .env');
+    } catch (e) {
+      console.warn('[Pointy] Notice loading .env:', e.message);
+    }
+  }
+}
+loadEnv();
+
 const { GnaniService } = require('./services/gnani-service');
 const { GeminiService } = require('./services/gemini-service');
+const { AssemblyAIService } = require('./services/assemblyai-service');
+const { GoogleTTSService } = require('./services/google-tts-service');
+
+// Ensure single instance to prevent hotkey conflicts
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (overlayWindow) {
+      if (overlayWindow.isMinimized()) overlayWindow.restore();
+      overlayWindow.focus();
+      handleHotkeyPress();
+    }
+  });
+}
 
 // Keep references to prevent garbage collection
 let overlayWindow = null;
 let tray = null;
+let assemblyaiService = null;
 let gnaniService = null;
 let geminiService = null;
-let appState = 'idle'; // idle | listening | thinking | pointing | waiting_next
+let googleTtsService = null;
+let appState = 'idle'; // idle | listening | thinking | pointing
 
 // ─── App Configuration ───────────────────────────────────────────────
 const CONFIG = {
-  hotkey: 'CommandOrControl+Shift+Space',
+  hotkey: 'Alt+C',
+  assemblyaiApiKey: process.env.ASSEMBLYAI_API_KEY || '',
   gnaniApiKey: process.env.GNANI_API_KEY || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
+  googleTtsApiKey: process.env.GOOGLE_TTS_API_KEY || process.env.GEMINI_API_KEY || '',
 };
 
 // ─── Create the transparent overlay window ───────────────────────────
 function createOverlayWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
+  const { x, y, width, height } = primaryDisplay.bounds;
+
+  // Auto-allow microphone access without prompt
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    if (permission === 'media') return true;
+    return false;
+  });
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'media') return callback(true);
+    return callback(false);
+  });
 
   overlayWindow = new BrowserWindow({
-    x: 0,
-    y: 0,
-    width: primaryDisplay.size.width,
-    height: primaryDisplay.size.height,
+    x,
+    y,
+    width,
+    height,
     transparent: true,
     frame: false,
     hasShadow: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    resizable: false,
-    focusable: false,
+    resizable: true,
+    enableLargerThanScreen: true,
+    show: true,
+    thickFrame: false,
+    backgroundMaterial: 'none',
+    backgroundColor: '#00000000',
+    title: 'Pointy AI - Spatial Red Cursor',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -42,16 +118,35 @@ function createOverlayWindow() {
     },
   });
 
-  // Make entire window click-through by default
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  // Pipe renderer console messages to terminal
+  overlayWindow.webContents.on('console-message', (e, level, message) => {
+    console.log(`[Overlay Console] ${message}`);
+  });
 
-  // Keep on top of everything including fullscreen apps
-  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  overlayWindow.once('ready-to-show', () => {
+    // Force bounds to primaryDisplay.bounds so it fully overlays the Windows Taskbar
+    overlayWindow.setBounds(primaryDisplay.bounds);
+    overlayWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+    overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    overlayWindow.show();
+    overlayWindow.moveTop();
+    console.log('[Pointy] ✅ Overlay window covers full screen bounds:', overlayWindow.getBounds());
+
+    // Delay click-through slightly so Windows DWM reliably paints the first frame
+    setTimeout(() => {
+      overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+      console.log('[Pointy] ✅ Click-through enabled');
+    }, 400);
+
+    // Trigger startup intro animation after window is ready
+    setTimeout(() => {
+      const cursorPoint = screen.getCursorScreenPoint();
+      console.log(`[Pointy] 🚀 Triggering startup intro showcase at (${cursorPoint.x}, ${cursorPoint.y})`);
+      overlayWindow?.webContents.send('startup-intro', cursorPoint);
+    }, 600);
+  });
 
   overlayWindow.loadFile(path.join(__dirname, '..', 'renderer', 'overlay.html'));
-
-  // Don't show in alt-tab
-  overlayWindow.setSkipTaskbar(true);
 
   overlayWindow.on('closed', () => {
     overlayWindow = null;
@@ -69,25 +164,27 @@ function createTray() {
   tray = new Tray(icon);
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: '🎯 Pointy AI', enabled: false },
+    { label: '🔴 Pointy AI - Red Spatial Cursor', enabled: false },
     { type: 'separator' },
-    { label: `Hotkey: ${CONFIG.hotkey}`, enabled: false },
     {
-      label: 'Set API Keys...',
+      label: '🎙️ Ask with Voice (Ctrl + Space / F8)',
+      click: () => handleHotkeyPress(),
+    },
+    {
+      label: '💬 Type a Question (Alt + T)',
+      click: () => overlayWindow?.webContents.send('toggle-text-input'),
+    },
+    {
+      label: '⚙️ Set API Keys...',
       click: () => promptApiKey(),
     },
-    { type: 'separator' },
     {
-      label: 'Show Buddy',
-      click: () => overlayWindow?.webContents.send('toggle-buddy', true),
-    },
-    {
-      label: 'Hide Buddy',
-      click: () => overlayWindow?.webContents.send('toggle-buddy', false),
+      label: '🔄 Reset to Standby (Esc)',
+      click: () => resetState(),
     },
     { type: 'separator' },
     {
-      label: 'Quit Pointy',
+      label: 'Quit Pointy AI',
       click: () => {
         app.isQuitting = true;
         app.quit();
@@ -95,11 +192,11 @@ function createTray() {
     },
   ]);
 
-  tray.setToolTip('Pointy AI - Press Ctrl+Shift+Space to ask');
+  tray.setToolTip('Pointy AI — Spatial Red AI Cursor (Ctrl + Space / F8)');
   tray.setContextMenu(contextMenu);
 }
 
-// Create a simple colored icon buffer for the tray
+// Create a crimson red icon buffer for the tray
 function createTrayIconBuffer(size) {
   const buffer = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y++) {
@@ -107,9 +204,9 @@ function createTrayIconBuffer(size) {
       const idx = (y * size + x) * 4;
       const dist = Math.sqrt(Math.pow(x - size / 2, 2) + Math.pow(y - size / 2, 2));
       if (dist < size / 2 - 1) {
-        buffer[idx] = 100;     // R
-        buffer[idx + 1] = 120; // G
-        buffer[idx + 2] = 255; // B
+        buffer[idx] = 255;     // R (Vibrant Red)
+        buffer[idx + 1] = 23;  // G
+        buffer[idx + 2] = 68;  // B
         buffer[idx + 3] = 255; // A
       } else {
         buffer[idx + 3] = 0;
@@ -121,21 +218,85 @@ function createTrayIconBuffer(size) {
 
 // ─── Register global hotkeys ─────────────────────────────────────────
 function registerHotkeys() {
-  globalShortcut.register(CONFIG.hotkey, () => {
-    handleHotkeyPress();
-  });
+  const hotkeys = [
+    'Alt+C',
+    'F8',
+    'F9',
+    'CommandOrControl+Alt+Space',
+    'CommandOrControl+Shift+Space',
+  ];
 
-  globalShortcut.register('Escape', () => {
-    if (appState !== 'idle') {
-      resetState();
+  hotkeys.forEach((hk) => {
+    try {
+      const registered = globalShortcut.register(hk, () => {
+        console.log(`[Pointy] ⚡ Hotkey triggered: ${hk}`);
+        handleHotkeyPress();
+      });
+      if (registered) {
+        console.log(`[Pointy] ✅ Registered hotkey: ${hk}`);
+      } else {
+        console.warn(`[Pointy] ⚠️  Hotkey ${hk} could not be registered (in use by system)`);
+      }
+    } catch (e) {
+      console.warn(`[Pointy] Error registering hotkey ${hk}:`, e.message);
     }
   });
+
+  try {
+    globalShortcut.register('Escape', () => {
+      console.log('[Pointy] 🔄 Escape key pressed');
+      resetState();
+    });
+    console.log('[Pointy] ✅ Registered hotkey: Escape');
+  } catch (e) {
+    console.warn('[Pointy] Notice: Escape hotkey registration:', e.message);
+  }
+
+  try {
+    globalShortcut.register('Alt+T', () => {
+      console.log('[Pointy] ⌨️ Alt+T triggered -> Opening text input');
+      overlayWindow?.webContents.send('toggle-text-input');
+    });
+    console.log('[Pointy] ✅ Registered hotkey: Alt+T (Type question)');
+  } catch (e) {
+    console.warn('[Pointy] Notice: Alt+T registration:', e.message);
+  }
+}
+
+// ─── Real-time Cursor Tracking (Follows original cursor when not in use) ──
+let mouseTrackInterval = null;
+let lastCursorPos = { x: -1, y: -1 };
+
+function startMouseTracking() {
+  if (mouseTrackInterval) return;
+
+  const pt = screen.getCursorScreenPoint();
+  lastCursorPos = pt;
+  overlayWindow?.webContents.send('cursor-follow', pt);
+
+  mouseTrackInterval = setInterval(() => {
+    if (appState === 'listening' || appState === 'thinking') {
+      const currentPt = screen.getCursorScreenPoint();
+      if (currentPt.x !== lastCursorPos.x || currentPt.y !== lastCursorPos.y) {
+        lastCursorPos = currentPt;
+        overlayWindow?.webContents.send('cursor-follow', currentPt);
+        overlayWindow?.moveTop();
+      }
+    }
+  }, 16);
+}
+
+function stopMouseTracking() {
+  if (mouseTrackInterval) {
+    clearInterval(mouseTrackInterval);
+    mouseTrackInterval = null;
+  }
 }
 
 // ─── Handle the main hotkey press ────────────────────────────────────
 async function handleHotkeyPress() {
   if (appState === 'listening') {
-    // Stop listening and process
+    console.log('[Pointy] Stop listening requested');
     appState = 'thinking';
     overlayWindow?.webContents.send('state-change', 'thinking');
     overlayWindow?.webContents.send('stop-recording');
@@ -147,10 +308,69 @@ async function handleHotkeyPress() {
     return;
   }
 
-  // Start listening
+  // Get current cursor location from mouse
+  const cursorPoint = screen.getCursorScreenPoint();
+  console.log(`[Pointy] 🔴 Popping out red cursor from mouse pos: (${cursorPoint.x}, ${cursorPoint.y})`);
+
+  // Pop out the Red AI Cursor from the user's mouse position!
+  overlayWindow?.webContents.send('pop-out-cursor', cursorPoint);
+
+  // Start listening and continuously follow user's original cursor!
   appState = 'listening';
+  startMouseTracking();
   overlayWindow?.webContents.send('state-change', 'listening');
   overlayWindow?.webContents.send('start-recording');
+}
+
+// ─── Screen Capture Engine (Hardware Accelerated with Fallback) ───────
+async function captureScreenBuffer() {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.size;
+  const scale = primaryDisplay.scaleFactor || 1;
+
+  // 1. Try Electron native desktopCapturer (GPU & DWM compositor direct capture)
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: {
+        width: Math.round(width * scale),
+        height: Math.round(height * scale),
+      },
+    });
+
+    if (sources && sources.length > 0) {
+      const screenSource = sources.find((s) => s.id.includes('0:0') || s.name.toLowerCase().includes('entire') || s.name.toLowerCase().includes('screen 1')) || sources[0];
+      const img = screenSource.thumbnail;
+      if (!img.isEmpty()) {
+        const jpegBuf = img.toJPEG(90);
+        if (jpegBuf && jpegBuf.length > 1000) {
+          logToFile(`📸 Screen captured via desktopCapturer (${jpegBuf.length} bytes, ${Math.round(width * scale)}x${Math.round(height * scale)})`);
+          try {
+            fs.writeFileSync(path.join(__dirname, '../../scratch/last-capture.jpg'), jpegBuf);
+          } catch (_) {}
+          return jpegBuf;
+        }
+      }
+    }
+  } catch (dcErr) {
+    logToFile(`desktopCapturer notice: ${dcErr.message}`);
+  }
+
+  // 2. Fallback: screenshot-desktop
+  try {
+    const buf = await screenshot({ format: 'jpg' });
+    if (buf && buf.length > 0) {
+      logToFile(`📸 Screen captured via screenshot-desktop fallback (${buf.length} bytes)`);
+      try {
+        fs.writeFileSync(path.join(__dirname, '../../scratch/last-capture.jpg'), buf);
+      } catch (_) {}
+      return buf;
+    }
+  } catch (ssErr) {
+    logToFile(`screenshot-desktop fallback notice: ${ssErr.message}`);
+  }
+
+  throw new Error('Screen capture failed');
 }
 
 // ─── Process the user's voice question ───────────────────────────────
@@ -159,34 +379,51 @@ async function processQuestion(audioBuffer) {
     appState = 'thinking';
     overlayWindow?.webContents.send('state-change', 'thinking');
 
-    // Step 1: Take a screenshot
-    console.log('[Pointy] 📸 Capturing screen...');
-    const screenshotBuffer = await screenshot({ format: 'png' });
+    logToFile('⚡ Capturing screen and transcribing audio in parallel...');
+    const [screenshotBuffer, sttResult] = await Promise.all([
+      captureScreenBuffer(),
+      (async () => {
+        if (assemblyaiService && assemblyaiService.hasApiKey()) {
+          logToFile(`🎙️ Transcribing audio (${audioBuffer?.length || 0} bytes) with AssemblyAI...`);
+          return await assemblyaiService.transcribe(audioBuffer);
+        } else if (gnaniService && gnaniService.hasApiKey()) {
+          logToFile(`🎙️ Transcribing audio with Gnani Prisma...`);
+          return await gnaniService.transcribe(audioBuffer);
+        } else {
+          logToFile('⚠️ No STT API key — using demo question');
+          return { transcript: 'Where is the settings button?', language: 'en-US' };
+        }
+      })(),
+    ]);
 
-    // Step 2: Transcribe audio with Prisma (or use Web Speech API fallback)
-    console.log('[Pointy] 🎤 Transcribing...');
-    let transcript, detectedLang;
+    const transcript = (sttResult?.transcript || '').trim();
+    const detectedLang = sttResult?.language || 'en-US';
 
-    if (gnaniService.hasApiKey()) {
-      const sttResult = await gnaniService.transcribe(audioBuffer);
-      transcript = sttResult.transcript;
-      detectedLang = sttResult.language || 'en-IN';
-    } else {
-      // Demo mode - use a sample question
-      transcript = 'Where is the settings button?';
-      detectedLang = 'en-IN';
+    if (!transcript) {
+      logToFile('⚠️ No speech detected in audio stream');
+      overlayWindow?.webContents.send('error', "I didn't catch that. Please ask again or press Alt+T to type!");
+      setTimeout(() => {
+        if (appState === 'thinking') {
+          resetState();
+        }
+      }, 4000);
+      return;
     }
 
-    console.log(`[Pointy] 💬 Transcript: "${transcript}" (${detectedLang})`);
+    logToFile(`💬 User Transcript: "${transcript}" (${detectedLang})`);
     overlayWindow?.webContents.send('transcript', { text: transcript, lang: detectedLang });
 
-    // Step 3: Send screenshot + question to Gemini Flash 2.5
+    // Step 3: Send screenshot + question to Gemini
     await analyzeAndPoint(screenshotBuffer, transcript, detectedLang);
 
   } catch (error) {
-    console.error('[Pointy] Error processing question:', error);
+    logToFile(`❌ Error processing voice question: ${error.message}`);
     overlayWindow?.webContents.send('error', error.message);
-    resetState();
+    setTimeout(() => {
+      if (appState === 'thinking') {
+        resetState();
+      }
+    }, 4500);
   }
 }
 
@@ -196,18 +433,22 @@ async function processTypedQuestion(question) {
     appState = 'thinking';
     overlayWindow?.webContents.send('state-change', 'thinking');
 
-    console.log('[Pointy] 📸 Capturing screen...');
-    const screenshotBuffer = await screenshot({ format: 'png' });
+    logToFile(`⌨️ Typed question: "${question}"`);
+    const screenshotBuffer = await captureScreenBuffer();
 
-    overlayWindow?.webContents.send('transcript', { text: question, lang: 'en-IN' });
+    overlayWindow?.webContents.send('transcript', { text: question, lang: 'en-US' });
 
-    // Send screenshot + question to Gemini Flash 2.5
-    await analyzeAndPoint(screenshotBuffer, question, 'en-IN');
+    // Send screenshot + question to Gemini
+    await analyzeAndPoint(screenshotBuffer, question, 'en-US');
 
   } catch (error) {
-    console.error('[Pointy] Error:', error);
+    logToFile(`❌ Error processing typed question: ${error.message}`);
     overlayWindow?.webContents.send('error', error.message);
-    resetState();
+    setTimeout(() => {
+      if (appState === 'thinking') {
+        resetState();
+      }
+    }, 4500);
   }
 }
 
@@ -223,84 +464,129 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
   let result;
 
   if (geminiService.hasApiKey()) {
-    // 🚀 Use Gemini Flash 2.5 — vision model sees screenshot directly
-    console.log('[Pointy] 🧠 Asking Gemini Flash 2.5...');
+    logToFile(`🧠 Asking Gemini model for: "${question}"`);
     result = await geminiService.analyzeScreen(screenshotBuffer, question, language, displayInfo);
+    logToFile(`✅ Gemini response: found=${result.found}, reply="${result.reply}", steps=${result.steps?.length || 0}`);
   } else {
-    // Demo mode — return a simulated result
-    console.log('[Pointy] ⚠️  No GEMINI_API_KEY — using demo response');
+    logToFile('⚠️ No GEMINI_API_KEY — using demo response');
     result = getDemoResponse(question);
   }
 
-  console.log('[Pointy] ✅ Result:', JSON.stringify(result, null, 2));
-
-  // Point at the target elements
-  appState = 'pointing';
-  overlayWindow?.webContents.send('state-change', 'pointing');
-  overlayWindow?.webContents.send('point-at', { result });
-
-  // Speak the reply with Timbre (or browser TTS fallback)
-  if (result.reply) {
-    if (gnaniService.hasApiKey()) {
-      console.log('[Pointy] 🔊 Speaking with Timbre...');
-      const audioData = await gnaniService.speak(result.reply, result.reply_lang || language);
-      if (audioData) {
-        overlayWindow?.webContents.send('play-audio', audioData.toString('base64'));
-      }
-    } else {
-      // Use browser's built-in speech synthesis as fallback
-      overlayWindow?.webContents.send('speak-fallback', {
-        text: result.reply,
-        lang: result.reply_lang || language,
-      });
+  // Synthesize speech using Google Cloud TTS ONLY (no other laggy TTS)
+  let audioBase64 = null;
+  if (result.reply && googleTtsService && googleTtsService.hasApiKey()) {
+    logToFile('🔊 Synthesizing speech with Google Cloud TTS...');
+    try {
+      audioBase64 = await googleTtsService.speak(result.reply, result.reply_lang || language);
+      logToFile(`🔊 TTS synthesis complete (${audioBase64 ? audioBase64.length : 0} bytes base64)`);
+    } catch (ttsErr) {
+      logToFile(`⚠️ Google Cloud TTS error: ${ttsErr.message}`);
     }
   }
+
+  // Point at the target elements and start speaking simultaneously as cursor begins moving!
+  appState = 'pointing';
+  stopMouseTracking();
+  overlayWindow?.moveTop();
+  overlayWindow?.webContents.send('state-change', 'pointing');
+  overlayWindow?.webContents.send('point-at', { result, audioBase64 });
 }
 
 // ─── Demo response when no API key is set ────────────────────────────
 function getDemoResponse(question) {
-  const q = question.toLowerCase();
+  const q = (question || '').toLowerCase();
   const primaryDisplay = screen.getPrimaryDisplay();
   const sw = primaryDisplay.size.width;
   const sh = primaryDisplay.size.height;
 
-  // Simulate finding a UI element based on common keywords
-  if (q.includes('setting') || q.includes('gear') || q.includes('config')) {
+  // Simulate finding UI elements based on common queries
+  if (q.includes('setting') || q.includes('gear') || q.includes('config') || q.includes('option')) {
     return {
       found: true,
-      reply: 'Here are the Settings! Look at this button right here.',
-      reply_lang: 'en-IN',
-      steps: [{ x: sw - 80, y: 12, w: 40, h: 40, label: 'Settings', instruction: 'This is the Settings button' }],
+      reply: 'Here are the Settings! Look right here at this button.',
+      reply_lang: 'en-US',
+      steps: [{ x: sw - 85, y: 16, w: 44, h: 44, label: 'Settings', instruction: 'This is the Settings button right here.' }],
     };
   }
   if (q.includes('close') || q.includes('exit') || q.includes('quit')) {
     return {
       found: true,
-      reply: 'Here is the close button, in the top right corner.',
-      reply_lang: 'en-IN',
-      steps: [{ x: sw - 30, y: 8, w: 46, h: 32, label: 'Close', instruction: 'This is the Close button' }],
+      reply: 'Here is the Close button in the top-right corner.',
+      reply_lang: 'en-US',
+      steps: [{ x: sw - 48, y: 4, w: 46, h: 32, label: 'Close Window', instruction: 'Here is the Close button.' }],
     };
   }
-  if (q.includes('search') || q.includes('find')) {
+  if (q.includes('search') || q.includes('find') || q.includes('google') || q.includes('query')) {
     return {
       found: true,
-      reply: 'You can search using this search bar right here!',
-      reply_lang: 'en-IN',
-      steps: [{ x: sw / 2 - 150, y: 50, w: 300, h: 36, label: 'Search', instruction: 'Type your search here' }],
+      reply: 'You can search right here! Type your query in this search field.',
+      reply_lang: 'en-US',
+      steps: [{ x: Math.round(sw / 2 - 160), y: 40, w: 320, h: 38, label: 'Search Field', instruction: 'Type your search query into this input.' }],
+    };
+  }
+  if (q.includes('file') || q.includes('folder') || q.includes('explorer') || q.includes('menu')) {
+    return {
+      found: true,
+      reply: 'Here is the File menu on the top-left.',
+      reply_lang: 'en-US',
+      steps: [{ x: 16, y: 32, w: 56, h: 30, label: 'File Menu', instruction: 'Click here to access files and folders.' }],
+    };
+  }
+  if (q.includes('terminal') || q.includes('console') || q.includes('code') || q.includes('run')) {
+    return {
+      found: true,
+      reply: 'Here is your terminal and workspace area.',
+      reply_lang: 'en-US',
+      steps: [{ x: 80, y: Math.round(sh - 220), w: 360, h: 140, label: 'Workspace / Terminal', instruction: 'Run commands or view output here.' }],
     };
   }
 
+  // Check if user is asking for an explanation
+  const isExplaining = q.includes('explain') || q.includes('why') || q.includes('how') || q.includes('what is') || q.includes('error') || q.includes('help');
+  if (isExplaining) {
+    return {
+      mode: 'assistant',
+      found: true,
+      reply: `Here is the explanation for: ${question}. I've summarized the key insights on your screen!`,
+      detailed_explanation: `### Pointy AI Assistant Analysis\n\n**Question:** "${question}"\n\n* **Overview:** Pointy AI acts as both your screen pointer and your inbuilt desktop AI assistant.\n* **Screen Context:** Analyzes all visible code, terminals, windows, and errors.\n* **Full Power:** Connect your **GEMINI_API_KEY** in \`.env\` for live real-time visual reasoning across all open applications!`,
+      reply_lang: 'en-US',
+      steps: [
+        {
+          x: Math.round(sw / 2 - 160),
+          y: Math.round(sh / 2 - 80),
+          w: 320,
+          h: 120,
+          label: 'Active Workspace',
+          instruction: `Assisting with: "${question}"`
+        }
+      ],
+    };
+  }
+
+  // General fallback pointing response
   return {
+    mode: 'pointer',
     found: true,
-    reply: `I see your screen! In demo mode, I'm pointing at the center. Set GEMINI_API_KEY for real analysis.`,
-    reply_lang: 'en-IN',
-    steps: [{ x: sw / 2 - 50, y: sh / 2 - 20, w: 100, h: 40, label: 'Demo Target', instruction: 'Set GEMINI_API_KEY for real results' }],
+    reply: `I heard: "${question}". Look right here, I've highlighted the solution for you!`,
+    detailed_explanation: `Pointed at the target for "${question}". Set GEMINI_API_KEY in .env for full live screen reasoning!`,
+    reply_lang: 'en-US',
+    steps: [
+      {
+        x: Math.round(sw / 2 - 120),
+        y: Math.round(sh / 2 - 40),
+        w: 240,
+        h: 70,
+        label: 'Active Element',
+        instruction: `Pointed at the target for "${question}".`
+      }
+    ],
   };
 }
 
 // ─── Reset to idle state ─────────────────────────────────────────────
 function resetState() {
   appState = 'idle';
+  stopMouseTracking();
   overlayWindow?.webContents.send('state-change', 'idle');
   overlayWindow?.webContents.send('reset');
 }
@@ -336,13 +622,24 @@ function setupIPC() {
     }
   });
 
+  // Programmatic voice summon (from dock click or tray)
+  ipcMain.on('trigger-voice-summon', () => {
+    console.log('[Pointy] 🖱️ Voice summon triggered from UI dock click');
+    handleHotkeyPress();
+  });
+
+  // Get current cursor location
+  ipcMain.handle('get-cursor-position', () => {
+    return screen.getCursorScreenPoint();
+  });
+
   // Receive recorded audio from renderer
   ipcMain.on('audio-recorded', async (event, audioBase64) => {
     const audioBuffer = Buffer.from(audioBase64, 'base64');
     await processQuestion(audioBuffer);
   });
 
-  // Receive typed question
+  // Receive typed or transcribed question
   ipcMain.on('typed-question', async (event, question) => {
     await processTypedQuestion(question);
   });
@@ -350,6 +647,7 @@ function setupIPC() {
   // State management
   ipcMain.on('pointing-complete', () => {
     appState = 'idle';
+    stopMouseTracking();
   });
 
   ipcMain.on('request-reset', () => {
@@ -369,10 +667,10 @@ function setupIPC() {
   // Take screenshot on demand
   ipcMain.handle('take-screenshot', async () => {
     try {
-      const buf = await screenshot({ format: 'png' });
+      const buf = await captureScreenBuffer();
       return buf.toString('base64');
     } catch (e) {
-      console.error('[Pointy] Screenshot error:', e);
+      logToFile(`Screenshot IPC error: ${e.message}`);
       return null;
     }
   });
@@ -381,8 +679,10 @@ function setupIPC() {
 // ─── App lifecycle ───────────────────────────────────────────────────
 app.whenReady().then(async () => {
   // Initialize services
+  assemblyaiService = new AssemblyAIService(CONFIG.assemblyaiApiKey);
   gnaniService = new GnaniService(CONFIG.gnaniApiKey);
   geminiService = new GeminiService(CONFIG.geminiApiKey);
+  googleTtsService = new GoogleTTSService(CONFIG.googleTtsApiKey);
 
   // Create overlay and tray
   createOverlayWindow();
@@ -390,21 +690,31 @@ app.whenReady().then(async () => {
   setupIPC();
   registerHotkeys();
 
-  console.log('[Pointy] 🎯 Pointy AI is running!');
-  console.log(`[Pointy] Press ${CONFIG.hotkey} to ask a question`);
-  console.log('[Pointy] Double-click the buddy to type a question');
+  console.log('[Pointy] 🔴 Pointy AI - Spatial Red Cursor running!');
+  console.log('[Pointy] 🎙️ Summon via: Alt+C OR F8 OR Ctrl+Space OR click the Red Cursor');
+  console.log('[Pointy] 🎯 The Red AI Cursor pops out right from your mouse!');
 
-  if (CONFIG.geminiApiKey) {
-    console.log('[Pointy] ✅ Gemini Flash 2.5 ready (vision + reasoning)');
+  if (assemblyaiService.hasApiKey()) {
+    console.log('[Pointy] ✅ AssemblyAI ready (Speech-to-Text)');
+  } else if (gnaniService.hasApiKey()) {
+    console.log('[Pointy] ✅ Gnani Prisma ready (Speech-to-Text)');
+  } else {
+    console.log('[Pointy] ℹ️  No STT key configured (set ASSEMBLYAI_API_KEY in .env)');
+  }
+
+  if (geminiService.hasApiKey()) {
+    console.log('[Pointy] ✅ Gemini Vision & Reasoning model ready');
   } else {
     console.log('[Pointy] ⚠️  No GEMINI_API_KEY — running in demo mode');
     console.log('[Pointy]    Get a free key at: https://aistudio.google.com/apikey');
   }
 
-  if (CONFIG.gnaniApiKey) {
-    console.log('[Pointy] ✅ Gnani Prisma + Timbre ready (voice in/out)');
+  if (googleTtsService.hasApiKey()) {
+    console.log('[Pointy] ✅ Google Cloud TTS ready');
+  } else if (gnaniService.hasApiKey()) {
+    console.log('[Pointy] ✅ Gnani Timbre ready (TTS voice output)');
   } else {
-    console.log('[Pointy] ⚠️  No GNANI_API_KEY — voice uses browser fallback');
+    console.log('[Pointy] ℹ️  TTS uses natural browser voice playback');
   }
 });
 
@@ -415,9 +725,3 @@ app.on('will-quit', () => {
 app.on('window-all-closed', (e) => {
   e.preventDefault?.();
 });
-
-// Prevent multiple instances
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  app.quit();
-}

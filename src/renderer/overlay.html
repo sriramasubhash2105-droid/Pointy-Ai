@@ -3,93 +3,85 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pointy AI Overlay</title>
+  <title>Pointy AI - Spatial Red Cursor</title>
   <link rel="stylesheet" href="overlay.css">
 </head>
 <body>
-  <!-- Buddy Mascot -->
-  <div id="buddy" class="buddy idle">
-    <div class="buddy-body">
-      <div class="buddy-face">
-        <div class="buddy-eye left"></div>
-        <div class="buddy-eye right"></div>
-        <div class="buddy-mouth"></div>
+  <!-- Red AI Cursor (Natural 26px Cursor Size) -->
+  <div id="ai-cursor" class="ai-cursor idle">
+    <!-- User's Exact Red Cursor SVG (26px natural cursor size) -->
+    <div class="cursor-graphic" title="Pointy AI — Click or press Alt+C / F8 to speak">
+      <svg viewBox="0 0 512 512" width="26" height="26" class="cursor-svg">
+        <path d="M 71,1 L 461,328 L 209,313 L 49,510 Z" fill="#e21b1b" />
+      </svg>
+    </div>
+
+    <!-- Pop-out ripple shockwave effect -->
+    <div id="cursor-shockwave" class="cursor-shockwave"></div>
+
+    <!-- Sleek Loading Spinner (Appears INSTEAD of red cursor while processing) -->
+    <div id="cursor-loading-spinner" class="cursor-loading-spinner hidden">
+      <div class="spinner-ring"></div>
+      <div class="spinner-core"></div>
+    </div>
+
+    <!-- Quick Action Menu on Hover (When idle in corner) -->
+    <div id="cursor-hover-menu" class="cursor-hover-menu">
+      <button id="btn-quick-voice" class="quick-action-btn" title="Ask with Voice (Alt+C / F8)">
+        <span class="quick-icon">🎙️</span>
+        <span class="quick-label">Speak</span>
+      </button>
+      <button id="btn-quick-type" class="quick-action-btn" title="Type a Question (Alt+T)">
+        <span class="quick-icon">⌨️</span>
+        <span class="quick-label">Type</span>
+      </button>
+    </div>
+
+    <!-- Floating Answer Card / Speech Bubble (Anchored directly beside the red cursor at target!) -->
+    <div id="cursor-answer-card" class="cursor-answer-card hidden">
+      <div class="answer-card-header">
+        <div class="answer-badge">
+          <span class="badge-dot"></span>
+          <span id="badge-title" class="badge-title">Pointy AI</span>
+        </div>
+        <div class="answer-speaking-indicator">
+          <span class="speak-wave"></span>
+          <span class="speak-wave"></span>
+          <span class="speak-wave"></span>
+          <span class="speak-label">Speaking</span>
+        </div>
+        <button id="answer-close-btn" class="answer-close-btn" title="Close (Escape)">✕</button>
       </div>
-      <div class="buddy-glow"></div>
-    </div>
-    <div class="buddy-trail"></div>
-  </div>
 
-  <!-- Pointing Cursor -->
-  <div id="pointer" class="pointer hidden">
-    <svg viewBox="0 0 40 40" width="40" height="40">
-      <defs>
-        <linearGradient id="pointer-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:1" />
-          <stop offset="100%" style="stop-color:#2563eb;stop-opacity:1" />
-        </linearGradient>
-        <filter id="pointer-glow">
-          <feGaussianBlur stdDeviation="2" result="blur"/>
-          <feMerge>
-            <feMergeNode in="blur"/>
-            <feMergeNode in="SourceGraphic"/>
-          </feMerge>
-        </filter>
-      </defs>
-      <path d="M8 4 L8 32 L16 24 L26 34 L30 30 L20 20 L28 16 Z" 
-            fill="url(#pointer-gradient)" 
-            stroke="white" 
-            stroke-width="1.5"
-            filter="url(#pointer-glow)"/>
-    </svg>
-  </div>
+      <div class="answer-card-body">
+        <div id="answer-card-text" class="answer-card-text">Here is the solution!</div>
+      </div>
 
-  <!-- Target Ring (appears around pointed element) -->
-  <div id="target-ring" class="target-ring hidden">
-    <div class="ring-inner"></div>
-    <div class="ring-pulse"></div>
-    <div class="ring-label">
-      <span id="ring-label-text"></span>
+      <div id="answer-card-footer" class="answer-card-footer hidden">
+        <span id="answer-step-info" class="answer-step-info">Step 1 of 1</span>
+        <div class="answer-buttons">
+          <button id="answer-skip-btn" class="answer-btn secondary">Done</button>
+          <button id="answer-next-btn" class="answer-btn primary">Next Step →</button>
+        </div>
+      </div>
+
+      <!-- Arrow pointer pointing towards the red cursor -->
+      <div class="answer-card-caret"></div>
     </div>
   </div>
 
-  <!-- Status Panel -->
-  <div id="status-panel" class="status-panel hidden">
-    <div class="status-icon"></div>
-    <div class="status-text" id="status-text">Ready</div>
-  </div>
 
-  <!-- Caption Bar (for spoken text) -->
-  <div id="caption-bar" class="caption-bar hidden">
-    <div class="caption-content">
-      <span class="caption-icon">💬</span>
-      <span id="caption-text"></span>
-    </div>
-  </div>
 
-  <!-- Transcript display -->
-  <div id="transcript-display" class="transcript-display hidden">
-    <span class="transcript-icon">🎤</span>
-    <span id="transcript-text"></span>
-  </div>
-
-  <!-- Text Input (alternative to voice) -->
+  <!-- Text Input fallback (Double-click or press Enter to type) -->
   <div id="text-input-container" class="text-input-container hidden">
     <div class="input-wrapper">
       <span class="input-icon">🎯</span>
-      <input type="text" id="text-input" placeholder="Ask Pointy anything..." autocomplete="off">
+      <input type="text" id="text-input" placeholder="Type your question (or speak with Alt+C / F8)..." autocomplete="off">
       <button id="text-submit" class="input-submit">→</button>
     </div>
   </div>
 
-  <!-- Step Counter -->
-  <div id="step-counter" class="step-counter hidden">
-    <span id="step-current">1</span> of <span id="step-total">1</span>
-    <button id="step-next" class="step-btn">Next →</button>
-    <button id="step-skip" class="step-btn secondary">Skip</button>
-  </div>
-
-  <!-- Particle effects container -->
+  <!-- Particles container -->
   <div id="particles" class="particles"></div>
 
   <script src="overlay.js"></script>

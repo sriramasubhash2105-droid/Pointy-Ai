@@ -8,14 +8,14 @@ Pointy is an AI cursor buddy that lives on your screen. Summon it with a hotkey,
 
 ## ✨ Features
 
-- 🎙️ **Voice-first interaction** — Press `Ctrl+Shift+Space` and speak your question
-- 🎯 **Animated cursor pointing** — A smooth, glowing cursor flies to the exact UI element
-- 👁️ **Vision-powered** — Gemini Flash 2.5 sees your screenshot and reasons about it
-- 🌐 **Indian language support** — Hindi, Tamil, Telugu, Hinglish, and more via Gnani
-- 👣 **Multi-step guidance** — Walks you through complex tasks one click at a time
-- 💬 **On-screen captions** — See the answer even with sound off
-- 🖱️ **Non-intrusive** — Click-through overlay that never steals focus
-- ⌨️ **Text input fallback** — Double-click the buddy to type your question
+- 🔴 **Spatial Red AI Cursor** — Pops out directly from your mouse cursor when summoned
+- 🎙️ **Voice-first interaction** — Press `Ctrl + Space` and speak your question naturally
+- 🎯 **Laser-precise spatial guidance** — Red cursor glides along a smooth trajectory to the target UI element
+- 👁️ **Vision-powered** — Gemini Flash 2.5 analyzes screenshots and calculates pixel bounding boxes
+- 🔊 **Speaks with you** — Speaks answers aloud via TTS (Gnani Timbre or built-in speech engine)
+- 💬 **Adjacent answer card** — Shows the solution and instructions right beside the red cursor
+- 🖱️ **Non-intrusive click-through** — Transparent canvas overlay that never steals focus
+- ⌨️ **Text input fallback** — Double-click the standby dock or type if preferred
 
 ## 🚀 Quick Start
 
@@ -27,14 +27,12 @@ Pointy is an AI cursor buddy that lives on your screen. Summon it with a hotkey,
 
 ```bash
 # Clone the repo
-git clone https://github.com/your-username/pointy-ai.git
-cd pointy-ai
+cd "Pointy Ai"
 
 # Install dependencies
 npm install
 
-# Set your Gemini API key (free at https://aistudio.google.com/apikey)
-# PowerShell:
+# Optional: Set your Gemini API key (free at https://aistudio.google.com/apikey)
 $env:GEMINI_API_KEY="your_gemini_key"
 
 # Optional: Set Gnani API key for Indian-language voice
@@ -48,11 +46,12 @@ npm start
 
 | Action | How |
 | --- | --- |
-| Ask a question (voice) | `Ctrl + Shift + Space` → speak → press again |
-| Ask a question (text) | Double-click the buddy mascot |
-| Dismiss | Press `Escape` |
-| Next step (multi-step) | Click "Next →" button |
-| Move buddy | Drag it anywhere |
+| **Ask with Voice** | Press `Ctrl + Space` → speak your question → press again or pause |
+| **Pop-out origin** | The red cursor pops out directly from your current mouse pointer |
+| **Standby Dock** | Click the red dock in the bottom-right corner to speak |
+| **Ask with Text** | Double-click the standby dock |
+| **Dismiss / Reset** | Press `Escape` or click `✕` on the answer card |
+| **Next Step** | Click "Next Step →" on the floating answer card |
 
 ## 🏗️ Architecture
 
