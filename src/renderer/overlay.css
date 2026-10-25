@@ -47,65 +47,20 @@ body {
   z-index: 2147483647;
   transform-origin: 3.6px 0.5px; /* Tip of the red arrow cursor */
   will-change: left, top, transform;
-  pointer-events: auto;
-  cursor: pointer;
+  pointer-events: none !important;
+  cursor: default;
+  top: -100px;
+  left: -100px;
 }
 
-/* Idle state: comfortably resting in the corner above taskbar */
+/* Idle state: fluid companion cursor following user's mouse */
 .ai-cursor.idle {
-  bottom: 72px;
-  right: 45px;
-  left: auto !important;
-  top: auto !important;
-  animation: cursor-idle-float 3s ease-in-out infinite;
+  pointer-events: none !important;
 }
 
-@keyframes cursor-idle-float {
-  0%, 100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
-}
-
-/* Never show any text badge when idle — only the sleek red cursor */
-.cursor-idle-badge {
-  display: none !important;
-}
-
-/* Quick action menu on hover (idle in corner) */
+/* Never show any text badge or corner hover menu */
+.cursor-idle-badge,
 .cursor-hover-menu {
-  position: absolute;
-  right: 36px;
-  bottom: -4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(18, 14, 20, 0.75);
-  backdrop-filter: blur(28px) saturate(190%);
-  -webkit-backdrop-filter: blur(28px) saturate(190%);
-  border: 1px solid rgba(255, 45, 85, 0.35);
-  border-radius: 20px;
-  padding: 4px 8px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 0 14px var(--red-glow-subtle), inset 0 1px 1px rgba(255, 255, 255, 0.15);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(10px) scale(0.95);
-  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-  white-space: nowrap;
-  z-index: 9999999;
-}
-
-/* Reveal action buttons on hover when idle in corner */
-.ai-cursor.idle:hover .cursor-hover-menu {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(0) scale(1);
-}
-
-/* Hide hover menu when following mouse, pointing, or listening */
-.ai-cursor:not(.idle) .cursor-hover-menu {
   display: none !important;
 }
 
@@ -141,8 +96,9 @@ body {
   position: relative;
   width: 26px;
   height: 26px;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 6px rgba(255, 23, 68, 0.45));
   transition: transform 0.15s ease;
+  pointer-events: none;
 }
 
 .cursor-graphic:hover {
@@ -155,15 +111,28 @@ body {
   height: 26px;
 }
 
-/* Smooth motion when flying between points */
-.ai-cursor.flying {
-  transition: left 0.65s cubic-bezier(0.22, 1, 0.36, 1),
-              top 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+/* Listening state: vibrant glowing pulse to show voice recording feedback */
+.ai-cursor.listening .cursor-graphic {
+  filter: drop-shadow(0 0 10px rgba(255, 23, 68, 0.95)) drop-shadow(0 0 20px rgba(255, 23, 68, 0.6));
+  animation: cursor-listening-pulse 1s ease-in-out infinite alternate;
 }
 
-/* Fluid real-time tracking when following user's original cursor */
+@keyframes cursor-listening-pulse {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.18); }
+}
+
+/* Smooth, responsive motion when flying between points */
+.ai-cursor.flying {
+  transition: left 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+              top 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.55s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  pointer-events: none !important;
+}
+
+/* Fluid real-time tracking when following user's original cursor (driven by buttery RAF lerp) */
 .ai-cursor.following {
-  transition: left 0.05s ease-out, top 0.05s ease-out !important;
+  transition: none !important;
   pointer-events: none !important;
 }
 

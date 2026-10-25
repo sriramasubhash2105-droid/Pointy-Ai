@@ -134,6 +134,9 @@ function createOverlayWindow() {
     overlayWindow.moveTop();
     console.log('[Pointy] ✅ Overlay window covers full screen bounds:', overlayWindow.getBounds());
 
+    // Start mouse tracking immediately!
+    startMouseTracking();
+
     // Delay click-through slightly so Windows DWM reliably paints the first frame
     setTimeout(() => {
       overlayWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -257,7 +260,12 @@ function registerHotkeys() {
   try {
     globalShortcut.register('Alt+T', () => {
       console.log('[Pointy] ⌨️ Alt+T triggered -> Opening text input');
-      overlayWindow?.webContents.send('toggle-text-input');
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.setIgnoreMouseEvents(false);
+        overlayWindow.show();
+        overlayWindow.focus();
+        overlayWindow.webContents.send('toggle-text-input');
+      }
     });
     console.log('[Pointy] ✅ Registered hotkey: Alt+T (Type question)');
   } catch (e) {
@@ -265,7 +273,7 @@ function registerHotkeys() {
   }
 }
 
-// ─── Real-time Cursor Tracking (Follows original cursor when not in use) ──
+// ─── Real-time Cursor Tracking (Follows cursor continuously when not pointing) ──
 let mouseTrackInterval = null;
 let lastCursorPos = { x: -1, y: -1 };
 
@@ -277,12 +285,12 @@ function startMouseTracking() {
   overlayWindow?.webContents.send('cursor-follow', pt);
 
   mouseTrackInterval = setInterval(() => {
-    if (appState === 'listening' || appState === 'thinking') {
+    // Continuously follow the user's cursor whenever Pointy is not pointing at a target on screen
+    if (appState !== 'pointing') {
       const currentPt = screen.getCursorScreenPoint();
       if (currentPt.x !== lastCursorPos.x || currentPt.y !== lastCursorPos.y) {
         lastCursorPos = currentPt;
         overlayWindow?.webContents.send('cursor-follow', currentPt);
-        overlayWindow?.moveTop();
       }
     }
   }, 16);
@@ -596,7 +604,7 @@ function getDemoResponse(question) {
 // ─── Reset to idle state ─────────────────────────────────────────────
 function resetState() {
   appState = 'idle';
-  stopMouseTracking();
+  startMouseTracking();
   overlayWindow?.webContents.send('state-change', 'idle');
   overlayWindow?.webContents.send('reset');
 }
@@ -657,7 +665,7 @@ function setupIPC() {
   // State management
   ipcMain.on('pointing-complete', () => {
     appState = 'idle';
-    stopMouseTracking();
+    startMouseTracking();
   });
 
   ipcMain.on('request-reset', () => {

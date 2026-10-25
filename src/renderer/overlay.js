@@ -62,6 +62,12 @@ let currentSteps = [];
 let currentStepIndex = 0;
 let displayInfo = null;
 
+// Smooth, fluid companion flow state
+let targetCursorPos = { x: -100, y: -100 };
+let currentRenderPos = { x: -100, y: -100 };
+let currentTilt = 0;
+let isLerpLoopRunning = false;
+
 let mediaStream = null;
 let mediaRecorder = null;
 let audioChunks = [];
@@ -75,16 +81,32 @@ let vadInterval = null;
 
 // ─── Initialize ──────────────────────────────────────────────────────
 async function init() {
+  setupEventListeners();
+  setupIPCListeners();
+  setupSpeechRecognition();
+  setupCardResize();
+
+  // Start directly in companion following mode at mouse cursor
+  currentState = 'idle';
+  isFollowingMouse = true;
+  aiCursor.classList.add('idle', 'following');
+  aiCursor.classList.remove('flying', 'listening', 'thinking', 'pointing');
+  cursorAnswerCard.classList.add('hidden');
+  cursorLoadingSpinner?.classList.add('hidden');
+  hideTextInput();
+
+  // Attach immediately to current mouse position
+  window.pointyAPI.getCursorPosition().then((pos) => {
+    if (pos && typeof pos.x === 'number') {
+      followOriginalCursor(pos.x, pos.y);
+    }
+  }).catch(() => {});
+
   try {
     displayInfo = await window.pointyAPI.getDisplayInfo();
   } catch (e) {
     displayInfo = { size: { width: window.innerWidth, height: window.innerHeight } };
   }
-
-  setupEventListeners();
-  setupIPCListeners();
-  setupSpeechRecognition();
-  setupCardResize();
 
   // Load existing conversation memory reference in background
   try {
@@ -95,15 +117,7 @@ async function init() {
     console.warn('[Overlay] Notice loading active conversation:', e);
   }
 
-  // Cursor is already placed in resting corner via CSS idle class
-  currentState = 'idle';
-  aiCursor.classList.add('idle');
-  aiCursor.classList.remove('flying', 'following', 'listening', 'thinking', 'pointing');
-  cursorAnswerCard.classList.add('hidden');
-  cursorLoadingSpinner?.classList.add('hidden');
-  hideTextInput();
-
-  console.log('[Pointy Spatial Cursor] Engine ready');
+  console.log('[Pointy Spatial Cursor] Engine ready - following cursor companion');
 }
 
 // ─── Setup IPC Listeners ─────────────────────────────────────────────
@@ -183,7 +197,7 @@ function setupEventListeners() {
   let isMouseHoveringInteractive = false;
   window.addEventListener('mousemove', (event) => {
     const isInteractive = !!event.target.closest(
-      '#cursor-answer-card, #text-input-container, button, input, .ai-cursor, .cursor-hover-menu, .chat-turn, .code-copy-btn, .card-resize-handle'
+      '#cursor-answer-card, #text-input-container, button, input, .chat-turn, .code-copy-btn, .card-resize-handle'
     );
     if (isInteractive !== isMouseHoveringInteractive) {
       isMouseHoveringInteractive = isInteractive;
@@ -316,14 +330,14 @@ function popOutCursor(x, y) {
   const clampY = Math.max(0, Math.min(y || window.innerHeight / 2, window.innerHeight - 10));
 
   isFollowingMouse = true;
-  aiCursor.classList.remove('idle', 'flying');
+  aiCursor.classList.remove('flying');
   aiCursor.classList.add('following');
   aiCursor.style.bottom = 'auto';
   aiCursor.style.right = 'auto';
 
-  // Smooth companion offset (+8px, +6px) so user's original cursor pointer is 100% visible
-  const targetX = clampX + 8;
-  const targetY = clampY + 6;
+  // Smooth companion offset (+14px, +12px) so user's original cursor pointer is 100% visible
+  const targetX = clampX + 14;
+  const targetY = clampY + 12;
   aiCursor.style.left = (targetX - 3.6) + 'px';
   aiCursor.style.top = (targetY - 0.5) + 'px';
   currentCursorPos = { x: targetX, y: targetY };
@@ -343,57 +357,95 @@ function popOutCursor(x, y) {
 
   // NO text window shown while listening — viewer needs full screen visibility!
   cursorAnswerCard.classList.add('hidden');
-
   setAppState('listening');
-  startVoiceSession();
 }
 
 // ─── Real-time Cursor Following (Tracks user's original cursor) ───────
 function followOriginalCursor(mouseX, mouseY) {
-  if (!isFollowingMouse || currentState === 'pointing' || currentState === 'idle') {
+  if (currentState === 'pointing') {
     return;
   }
+  isFollowingMouse = true;
 
-  // Smooth companion offset (+8px right, +6px down)
+  // Smooth companion offset (+16px right, +14px down)
   // Keeps the original OS mouse cursor unobstructed and visible
-  const offsetX = 8;
-  const offsetY = 6;
+  const offsetX = 16;
+  const offsetY = 14;
 
   let targetX = mouseX + offsetX;
   let targetY = mouseY + offsetY;
 
-  // Screen boundary guards: allow smooth movement over taskbar without bouncing
-  if (targetX + 24 > window.innerWidth) {
-    targetX = mouseX - 26;
+  // Screen boundary guards: allow smooth movement over edges and taskbar
+  if (targetX + 28 > window.innerWidth) {
+    targetX = mouseX - 28;
+  }
+  if (targetY + 28 > window.innerHeight) {
+    targetY = mouseY - 28;
   }
 
-  // Allow cursor to freely follow anywhere on the screen including the full taskbar!
-  targetX = Math.max(0, Math.min(targetX, window.innerWidth - 2));
-  targetY = Math.max(0, Math.min(targetY, window.innerHeight - 2));
+  targetX = Math.max(0, Math.min(targetX, window.innerWidth - 4));
+  targetY = Math.max(0, Math.min(targetY, window.innerHeight - 4));
 
-  aiCursor.classList.remove('idle', 'flying');
-  aiCursor.classList.add('following');
-  aiCursor.style.bottom = 'auto';
-  aiCursor.style.right = 'auto';
-  aiCursor.style.left = (targetX - 3.6) + 'px';
-  aiCursor.style.top = (targetY - 0.5) + 'px';
+  targetCursorPos.x = targetX;
+  targetCursorPos.y = targetY;
 
-  currentCursorPos = { x: targetX, y: targetY };
+  // If first position, snap instantly so it doesn't fly from off-screen
+  if (currentRenderPos.x < 0) {
+    currentRenderPos.x = targetX;
+    currentRenderPos.y = targetY;
+    aiCursor.style.left = (targetX - 3.6) + 'px';
+    aiCursor.style.top = (targetY - 0.5) + 'px';
+  }
+
+  if (!isLerpLoopRunning) {
+    startLerpLoop();
+  }
+}
+
+function startLerpLoop() {
+  isLerpLoopRunning = true;
+
+  function loop() {
+    if (currentState !== 'pointing' && !aiCursor.classList.contains('flying')) {
+      const dx = targetCursorPos.x - currentRenderPos.x;
+      const dy = targetCursorPos.y - currentRenderPos.y;
+
+      // Responsive, fluid drag damping factor (snappy yet buttery smooth)
+      const ease = 0.20;
+
+      if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+        currentRenderPos.x += dx * ease;
+        currentRenderPos.y += dy * ease;
+
+        // Gentle, subtle aerodynamic tilt (-5deg to +5deg)
+        const targetTilt = Math.max(-5, Math.min(5, dx * 0.12));
+        currentTilt += (targetTilt - currentTilt) * 0.18;
+
+        aiCursor.style.left = (currentRenderPos.x - 3.6) + 'px';
+        aiCursor.style.top = (currentRenderPos.y - 0.5) + 'px';
+        aiCursor.style.transform = `rotate(${currentTilt.toFixed(2)}deg)`;
+        currentCursorPos = { x: currentRenderPos.x, y: currentRenderPos.y };
+      } else {
+        if (Math.abs(currentTilt) > 0.02) {
+          currentTilt += (0 - currentTilt) * 0.18;
+          aiCursor.style.transform = `rotate(${currentTilt.toFixed(2)}deg)`;
+        }
+      }
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
 }
 
 // ─── Startup Intro Showcase ──────────────────────────────────────────
 function playStartupIntro(mousePos) {
-  const x = Math.min(Math.max(80, mousePos?.x || window.innerWidth / 2), window.innerWidth - 80);
-  const y = Math.min(Math.max(80, mousePos?.y || window.innerHeight / 2), window.innerHeight - 80);
+  const x = (mousePos && typeof mousePos.x === 'number') ? mousePos.x : window.innerWidth / 2;
+  const y = (mousePos && typeof mousePos.y === 'number') ? mousePos.y : window.innerHeight / 2;
 
-  currentCursorPos = { x, y };
-
-  // Pop out Red Cursor right at user's mouse position!
-  aiCursor.classList.remove('idle', 'flying');
-  aiCursor.style.bottom = 'auto';
-  aiCursor.style.right = 'auto';
-  aiCursor.style.left = (x - 3.6) + 'px';
-  aiCursor.style.top = (y - 0.5) + 'px';
+  isFollowingMouse = true;
+  followOriginalCursor(x, y);
 
   aiCursor.classList.remove('pop-out');
   void aiCursor.offsetWidth;
@@ -403,23 +455,8 @@ function playStartupIntro(mousePos) {
   void cursorShockwave.offsetWidth;
   cursorShockwave.classList.add('animate');
 
-  spawnParticles(x, y, 14);
-
-  // Keep screen completely clean — NO text windows
+  spawnParticles(x + 14, y + 12, 12);
   cursorAnswerCard.classList.add('hidden');
-
-  // After 1.5 seconds, smoothly glide down into the idle standby corner
-  setTimeout(() => {
-    if (currentState === 'idle') {
-      aiCursor.classList.add('flying');
-      aiCursor.style.left = (window.innerWidth - 40) + 'px';
-      aiCursor.style.top = (window.innerHeight - 40) + 'px';
-
-      setTimeout(() => {
-        resetToStandby();
-      }, 500);
-    }
-  }, 1500);
 }
 
 // ─── State Management ────────────────────────────────────────────────
@@ -1105,7 +1142,11 @@ function pointToStep(index, fullText = null, audioBase64 = null, isChat = false)
   // Natural cursor tip offset (3.6px, 0.5px) for 26px cursor
   aiCursor.style.left = (cx - 3.6) + 'px';
   aiCursor.style.top = (cy - 0.5) + 'px';
+  aiCursor.style.transform = 'rotate(0deg)';
   currentCursorPos = { x: cx, y: cy };
+  currentRenderPos.x = cx;
+  currentRenderPos.y = cy;
+  currentTilt = 0;
 
   setAppState('pointing');
 
@@ -1118,7 +1159,7 @@ function pointToStep(index, fullText = null, audioBase64 = null, isChat = false)
         if (currentState === 'pointing') {
           resetToStandby();
         }
-      }, 7000);
+      }, 7500);
     }
   }
 
@@ -1127,11 +1168,11 @@ function pointToStep(index, fullText = null, audioBase64 = null, isChat = false)
 
   const displayText = fullText || step.instruction || step.label || 'Here it is!';
 
-  // When cursor arrives at target (~420ms), reveal answer text card beside cursor
+  // When cursor arrives at target (~540ms), reveal answer text card beside cursor
   setTimeout(() => {
     spawnParticles(cx, cy, 14);
     showAnswerBesideCursor(displayText, step, isChat);
-  }, 420);
+  }, 540);
 }
 
 function goToNextStep() {
@@ -1225,7 +1266,7 @@ function playAudioBase64(base64, isChat = false) {
   }
 }
 
-// ─── Reset to Standby (Esc returns to right bottom side of window) ────
+// ─── Reset to Standby (Follows cursor continuously) ──────────────────
 function resetToStandby() {
   cancelStandbyGlide();
   if (answerDismissTimer) {
@@ -1233,8 +1274,9 @@ function resetToStandby() {
     answerDismissTimer = null;
   }
 
-  isFollowingMouse = false;
-  aiCursor.classList.remove('following', 'listening', 'thinking', 'pointing', 'pop-out');
+  const wasPointing = (currentState === 'pointing');
+  currentState = 'idle';
+  isFollowingMouse = true;
 
   // Reset multi-turn chat session state and manual resize overrides
   isChatModeActive = false;
@@ -1251,22 +1293,6 @@ function resetToStandby() {
     activeAudio = null;
   }
 
-  // Smoothly glide cursor back to the right bottom side of the window (above taskbar)
-  aiCursor.classList.remove('idle');
-  aiCursor.classList.add('flying');
-  aiCursor.style.left = (window.innerWidth - 75) + 'px';
-  aiCursor.style.top = (window.innerHeight - 105) + 'px';
-
-  standbyGlideTimer = setTimeout(() => {
-    aiCursor.classList.remove('flying');
-    aiCursor.style.left = 'auto';
-    aiCursor.style.top = 'auto';
-    aiCursor.style.bottom = '72px';
-    aiCursor.style.right = '45px';
-    aiCursor.classList.add('idle');
-    standbyGlideTimer = null;
-  }, 450);
-
   cursorAnswerCard.classList.add('hidden');
   cursorLoadingSpinner?.classList.add('hidden');
   hideTextInput();
@@ -1274,8 +1300,40 @@ function resetToStandby() {
   currentSteps = [];
   currentStepIndex = 0;
   finalTranscript = '';
-  currentState = 'idle';
 
+  // Immediately rejoin and follow user's mouse position
+  window.pointyAPI.getCursorPosition().then((pos) => {
+    const mouseX = (pos && typeof pos.x === 'number') ? pos.x : window.innerWidth / 2;
+    const mouseY = (pos && typeof pos.y === 'number') ? pos.y : window.innerHeight / 2;
+
+    const targetX = Math.max(0, Math.min(mouseX + 16, window.innerWidth - 4));
+    const targetY = Math.max(0, Math.min(mouseY + 14, window.innerHeight - 4));
+
+    targetCursorPos.x = targetX;
+    targetCursorPos.y = targetY;
+
+    if (wasPointing) {
+      // Smooth cinematic return glide back to user's cursor
+      aiCursor.classList.remove('following', 'listening', 'thinking', 'pointing');
+      aiCursor.classList.add('flying');
+      aiCursor.style.left = (targetX - 3.6) + 'px';
+      aiCursor.style.top = (targetY - 0.5) + 'px';
+      aiCursor.style.transform = 'rotate(0deg)';
+
+      setTimeout(() => {
+        aiCursor.classList.remove('flying');
+        aiCursor.classList.add('idle', 'following');
+        currentRenderPos.x = targetX;
+        currentRenderPos.y = targetY;
+        currentTilt = 0;
+        if (!isLerpLoopRunning) startLerpLoop();
+      }, 420);
+    } else {
+      aiCursor.classList.remove('flying', 'listening', 'thinking', 'pointing');
+      aiCursor.classList.add('idle', 'following');
+      if (!isLerpLoopRunning) startLerpLoop();
+    }
+  }).catch(() => {});
 }
 
 // ─── Text Input Fallback ─────────────────────────────────────────────
@@ -1302,12 +1360,30 @@ function submitTypedQuestion() {
   if (!query) return;
 
   hideTextInput();
+  setAppState('thinking');
 
-  // Pop out red cursor from current mouse location or center
-  window.pointyAPI.getCursorPosition().then((pos) => {
-    popOutCursor(pos.x, pos.y);
-    submitVoiceQuestion(query);
-  });
+  // If the answer card was open when the user asked this question, it becomes a chat!
+  const cardIsOpen = cursorAnswerCard && !cursorAnswerCard.classList.contains('hidden');
+  if (isChatModeActive || (cardIsOpen && lastAnswerTurn)) {
+    if (!isChatModeActive && lastAnswerTurn) {
+      isChatModeActive = true;
+      cursorAnswerCard.classList.add('chat-mode');
+      applyCardSizing('', true);
+      chatStream.innerHTML = '';
+      if (lastAnswerTurn.question) {
+        appendUserTurn(lastAnswerTurn.question);
+      }
+      if (lastAnswerTurn.result) {
+        const prevAst = createAssistantTurnElement(lastAnswerTurn.result);
+        chatStream.appendChild(prevAst);
+        attachStreamListeners();
+      }
+    }
+    appendUserTurn(query);
+    appendThinkingTurn();
+  }
+
+  window.pointyAPI.sendTypedQuestion(query);
 }
 
 // ─── Particle Effects ────────────────────────────────────────────────
