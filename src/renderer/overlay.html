@@ -37,24 +37,49 @@
       </button>
     </div>
 
-    <!-- Floating Answer Card / Speech Bubble (Anchored directly beside the red cursor at target!) -->
+    <!-- Floating Answer Card / Conversation Hub (Anchored directly beside the red cursor at target!) -->
     <div id="cursor-answer-card" class="cursor-answer-card hidden">
       <div class="answer-card-header">
         <div class="answer-badge">
           <span class="badge-dot"></span>
-          <span id="badge-title" class="badge-title">Pointy AI</span>
+          <span id="badge-title" class="badge-title">Pointy Assistant</span>
         </div>
-        <div class="answer-speaking-indicator">
-          <span class="speak-wave"></span>
-          <span class="speak-wave"></span>
-          <span class="speak-wave"></span>
-          <span class="speak-label">Speaking</span>
+        <div class="answer-header-actions">
+          <div class="answer-speaking-indicator">
+            <span class="speak-wave"></span>
+            <span class="speak-wave"></span>
+            <span class="speak-wave"></span>
+            <span class="speak-label">Speaking</span>
+          </div>
+          <button id="btn-new-chat" class="header-action-btn" title="Start a fresh chat session">
+            <span class="action-icon">✨</span>
+            <span class="action-text">New Chat</span>
+          </button>
+          <button id="answer-close-btn" class="answer-close-btn" title="Close (Escape)">✕</button>
         </div>
-        <button id="answer-close-btn" class="answer-close-btn" title="Close (Escape)">✕</button>
       </div>
 
       <div class="answer-card-body">
-        <div id="answer-card-text" class="answer-card-text">Here is the solution!</div>
+        <!-- Multi-turn Conversation Stream (Just like ChatGPT / Gemini) -->
+        <div id="chat-stream" class="chat-stream">
+          <div id="answer-card-text" class="answer-card-text">Here is the solution!</div>
+        </div>
+      </div>
+
+      <!-- Follow-up input bar: Enables back-and-forth conversation continuity -->
+      <div id="card-input-bar" class="card-input-bar">
+        <input type="text" id="card-chat-input" class="card-chat-input" placeholder="Ask follow-up or continue chatting..." autocomplete="off" />
+        <button id="card-chat-mic" class="card-input-btn mic" title="Ask follow-up with voice">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+          </svg>
+        </button>
+        <button id="card-chat-send" class="card-input-btn send" title="Send question (Enter)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
       </div>
 
       <div id="answer-card-footer" class="answer-card-footer hidden">
@@ -67,6 +92,14 @@
 
       <!-- Arrow pointer pointing towards the red cursor -->
       <div class="answer-card-caret"></div>
+
+      <!-- Interactive Corner Resize Handle -->
+      <div id="card-resize-handle" class="card-resize-handle" title="Drag to resize card">
+        <svg viewBox="0 0 10 10" width="10" height="10">
+          <line x1="9" y1="1" x2="1" y2="9" stroke="rgba(255, 45, 85, 0.55)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="9" y1="5" x2="5" y2="9" stroke="rgba(255, 45, 85, 0.55)" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
     </div>
   </div>
 

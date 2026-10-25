@@ -29,6 +29,11 @@ class AssemblyAIService {
       throw new Error('AssemblyAI API key is missing');
     }
 
+    if (!audioBuffer || audioBuffer.length < 3500) {
+      console.log(`[AssemblyAI] ℹ️ Audio buffer too short (${audioBuffer?.length || 0} bytes) — skipping STT`);
+      return { transcript: '', language: 'en-US', confidence: 0 };
+    }
+
     try {
       console.log('[AssemblyAI] 📤 Uploading audio data (' + audioBuffer.length + ' bytes)...');
 
@@ -86,12 +91,21 @@ class AssemblyAIService {
             confidence: pollRes.data.confidence || 1.0,
           };
         } else if (status === 'error') {
-          throw new Error(pollRes.data.error || 'AssemblyAI transcription failed');
+          const errMsg = pollRes.data.error || 'AssemblyAI transcription failed';
+          if (errMsg.toLowerCase().includes('transcoding') || errMsg.toLowerCase().includes('file type')) {
+            console.warn('[AssemblyAI] Notice: audio format or length could not be transcoded:', errMsg);
+            return { transcript: '', language: 'en-US', confidence: 0 };
+          }
+          throw new Error(errMsg);
         }
       }
 
       throw new Error('AssemblyAI transcription timed out');
     } catch (err) {
+      if (err.message && (err.message.toLowerCase().includes('transcoding') || err.message.toLowerCase().includes('file type'))) {
+        console.warn('[AssemblyAI] Caught transcoding notice:', err.message);
+        return { transcript: '', language: 'en-US', confidence: 0 };
+      }
       console.error('[AssemblyAI] Transcription error:', err.response?.data || err.message);
       throw err;
     }

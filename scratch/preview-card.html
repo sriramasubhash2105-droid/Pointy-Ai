@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Red Glassmorphism Card Preview</title>
+  <link rel="stylesheet" href="../src/renderer/overlay.css">
+  <style>
+    body {
+      background: radial-gradient(circle at 40% 40%, #1e1b4b 0%, #0f172a 60%, #030712 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 40px;
+    }
+    .preview-stage {
+      position: relative;
+      width: 700px;
+      height: 600px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* Static override for preview */
+    .preview-stage .cursor-answer-card {
+      position: relative !important;
+      left: auto !important;
+      top: auto !important;
+      display: flex !important;
+      opacity: 1 !important;
+      animation: none !important;
+    }
+    .preview-stage .answer-card-caret {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-stage">
+    <div id="cursor-answer-card" class="cursor-answer-card assistant-mode">
+      <div class="answer-card-header">
+        <div class="answer-badge">
+          <span class="badge-dot"></span>
+          <span id="badge-title" class="badge-title">Pointy Assistant</span>
+        </div>
+        <div class="answer-header-actions">
+          <div class="answer-speaking-indicator">
+            <span class="speak-wave"></span>
+            <span class="speak-wave"></span>
+            <span class="speak-wave"></span>
+            <span class="speak-label">Speaking</span>
+          </div>
+          <button id="btn-new-chat" class="header-action-btn" title="Start a fresh chat session">
+            <span class="action-icon">✨</span>
+            <span class="action-text">New Chat</span>
+          </button>
+          <button id="answer-close-btn" class="answer-close-btn" title="Close (Escape)">✕</button>
+        </div>
+      </div>
+
+      <div class="answer-card-body">
+        <div id="chat-stream" class="chat-stream">
+          <div class="chat-turn user">
+            Where is the Source Control tab in VS Code?
+          </div>
+          <div class="chat-turn assistant">
+            <div class="chat-spoken-pill">🔊 Spoken response</div>
+            <div class="chat-msg-text">
+              <p>Source Control is located on the <strong>left Activity Bar</strong>. You can open it instantly using the shortcut below:</p>
+              <div class="code-block-wrapper">
+                <button class="code-copy-btn">Copy</button>
+                <pre><code>Ctrl + Shift + G</code></pre>
+              </div>
+              <div class="chat-target-badge">🎯 Point to Source Control</div>
+            </div>
+          </div>
+          <div class="chat-turn thinking">
+            <div class="thinking-dots">
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+            </div>
+            <span>Pointy is ready for your follow-up...</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="card-input-bar" class="card-input-bar">
+        <input type="text" id="card-chat-input" class="card-chat-input" placeholder="Ask follow-up or continue chatting..." autocomplete="off" />
+        <button id="card-chat-mic" class="card-input-btn mic" title="Ask follow-up with voice">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+          </svg>
+        </button>
+        <button id="card-chat-send" class="card-input-btn send" title="Send question (Enter)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

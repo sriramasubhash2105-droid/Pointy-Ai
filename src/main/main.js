@@ -45,6 +45,7 @@ const { GnaniService } = require('./services/gnani-service');
 const { GeminiService } = require('./services/gemini-service');
 const { AssemblyAIService } = require('./services/assemblyai-service');
 const { GoogleTTSService } = require('./services/google-tts-service');
+const { ConversationManager } = require('./services/conversation-manager');
 
 // Ensure single instance to prevent hotkey conflicts
 const gotTheLock = app.requestSingleInstanceLock();
@@ -67,6 +68,7 @@ let assemblyaiService = null;
 let gnaniService = null;
 let geminiService = null;
 let googleTtsService = null;
+let conversationManager = null;
 let appState = 'idle'; // idle | listening | thinking | pointing
 
 // ─── App Configuration ───────────────────────────────────────────────
@@ -463,14 +465,22 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
 
   let result;
 
+  // 1. Record user turn in persistent conversation memory
+  conversationManager?.addMessage('user', question);
+  const conversationHistory = conversationManager ? conversationManager.getGeminiHistory() : [];
+
   if (geminiService.hasApiKey()) {
-    logToFile(`🧠 Asking Gemini model for: "${question}"`);
-    result = await geminiService.analyzeScreen(screenshotBuffer, question, language, displayInfo);
-    logToFile(`✅ Gemini response: found=${result.found}, reply="${result.reply}", steps=${result.steps?.length || 0}`);
+    logToFile(`🧠 Asking Gemini model for: "${question}" (history turns: ${conversationHistory.length})`);
+    result = await geminiService.analyzeScreen(screenshotBuffer, question, language, displayInfo, conversationHistory);
+    logToFile(`✅ Gemini response: mode=${result.mode}, found=${result.found}, reply="${result.reply}", steps=${result.steps?.length || 0}`);
   } else {
     logToFile('⚠️ No GEMINI_API_KEY — using demo response');
     result = getDemoResponse(question);
   }
+
+  // 2. Record assistant turn in persistent conversation memory
+  conversationManager?.addMessage('assistant', result);
+  const activeConv = conversationManager ? conversationManager.getActiveConversation() : null;
 
   // Synthesize speech using Google Cloud TTS ONLY (no other laggy TTS)
   let audioBase64 = null;
@@ -489,7 +499,7 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
   stopMouseTracking();
   overlayWindow?.moveTop();
   overlayWindow?.webContents.send('state-change', 'pointing');
-  overlayWindow?.webContents.send('point-at', { result, audioBase64 });
+  overlayWindow?.webContents.send('point-at', { result, audioBase64, conversation: activeConv, question });
 }
 
 // ─── Demo response when no API key is set ────────────────────────────
@@ -674,11 +684,37 @@ function setupIPC() {
       return null;
     }
   });
+
+  // Conversation Sessions & Memory
+  ipcMain.handle('get-active-conversation', () => {
+    return conversationManager ? conversationManager.getActiveConversation() : null;
+  });
+
+  ipcMain.handle('start-new-chat', () => {
+    if (!conversationManager) return null;
+    const newConv = conversationManager.startNewConversation();
+    logToFile(`✨ Started new conversation session: ${newConv.id}`);
+    overlayWindow?.webContents.send('conversation-updated', { conversation: newConv });
+    return newConv;
+  });
+
+  ipcMain.handle('get-all-conversations', () => {
+    return conversationManager ? conversationManager.getAllConversations() : [];
+  });
+
+  ipcMain.handle('switch-conversation', (event, id) => {
+    if (!conversationManager) return null;
+    const conv = conversationManager.setActiveConversation(id);
+    logToFile(`🔄 Switched to conversation session: ${conv.id}`);
+    overlayWindow?.webContents.send('conversation-updated', { conversation: conv });
+    return conv;
+  });
 }
 
 // ─── App lifecycle ───────────────────────────────────────────────────
 app.whenReady().then(async () => {
   // Initialize services
+  conversationManager = new ConversationManager();
   assemblyaiService = new AssemblyAIService(CONFIG.assemblyaiApiKey);
   gnaniService = new GnaniService(CONFIG.gnaniApiKey);
   geminiService = new GeminiService(CONFIG.geminiApiKey);

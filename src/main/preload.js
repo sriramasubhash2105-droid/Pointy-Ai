@@ -38,4 +38,11 @@ contextBridge.exposeInMainWorld('pointyAPI', {
   getDisplayInfo: () => ipcRenderer.invoke('get-display-info'),
   getCursorPosition: () => ipcRenderer.invoke('get-cursor-position'),
   takeScreenshot: () => ipcRenderer.invoke('take-screenshot'),
+
+  // Conversation Memory & Sessions
+  getActiveConversation: () => ipcRenderer.invoke('get-active-conversation'),
+  startNewChat: () => ipcRenderer.invoke('start-new-chat'),
+  getAllConversations: () => ipcRenderer.invoke('get-all-conversations'),
+  switchConversation: (id) => ipcRenderer.invoke('switch-conversation', id),
+  onConversationUpdated: (callback) => ipcRenderer.on('conversation-updated', (_, data) => callback(data)),
 });

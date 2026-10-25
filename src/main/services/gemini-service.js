@@ -27,12 +27,14 @@ class GeminiService {
    * Returns element coordinates to point at + a spoken reply.
    *
    * @param {Buffer} screenshotBuffer - PNG screenshot of the screen
+   * @param {Buffer} screenshotBuffer - PNG/JPEG screenshot of the screen
    * @param {string} question - The user's question (transcribed or typed)
    * @param {string} language - Detected language code (e.g., 'hi-IN', 'en-IN')
    * @param {object} displayInfo - Screen dimensions and scale factor
-   * @returns {object} { found, reply, reply_lang, steps: [{ x, y, w, h, instruction }] }
+   * @param {Array} history - Prior conversation turns formatted for multi-turn chat
+   * @returns {object} { mode, found, reply, detailed_explanation, reply_lang, steps }
    */
-  async analyzeScreen(screenshotBuffer, question, language = 'en-IN', displayInfo = {}) {
+  async analyzeScreen(screenshotBuffer, question, language = 'en-IN', displayInfo = {}, history = []) {
     if (!this.ai) {
       throw new Error('Gemini API key not configured');
     }
@@ -43,28 +45,25 @@ class GeminiService {
     const overlayH = displayInfo.height || 1080;
 
     const systemPrompt = `You are Pointy, an intelligent screen-aware AI assistant and spatial companion living on the user's desktop.
-You inspect the user's active screen and answer their questions — acting BOTH as a pinpoint spatial guide and as a comprehensive in-depth AI assistant.
+You inspect the user's active screen and answer their questions — acting BOTH as a pinpoint spatial guide and as a comprehensive in-depth AI assistant (like Gemini on Android or ChatGPT on desktop).
 
-ADAPTIVE DEPTH INSTRUCTION (CRITICAL):
-Determine whether the user is asking for spatial navigation OR an in-depth explanation:
-
-1. SPATIAL / POINTING QUESTIONS (e.g. "where is...", "find...", "point to...", "show me...", "click on..."):
-   - "mode": "pointer"
-   - "reply": A concise, natural spoken answer (1-2 sentences, under 18 words) suitable for Google Cloud TTS.
-   - "detailed_explanation": A concise summary (or identical to reply).
-   - "steps": Pinpoint the EXACT bounding box [ymin, xmin, ymax, xmax] tightly enclosing the requested element.
-
-2. EXPLANATORY / ASSISTANT QUESTIONS (e.g. "explain...", "what does this mean...", "how does this code work?", "why is this failing?", "how do I configure...", "what does this button do?", "summarize this page", "help me fix this"):
-   - "mode": "assistant"
-   - "reply": A clear, conversational spoken summary (2-3 sentences, 25-45 words) capturing the key answer/takeaway naturally for voice speech.
-   - "detailed_explanation": A thorough, well-structured, comprehensive answer formatted with markdown:
-     * Use bold headings and clean bullet points for steps or reasons.
-     * Include code snippets with proper markdown formatting if relevant.
-     * Explain the 'why' and 'how' in depth so the user gets complete assistance right on their screen.
-   - "steps":
-     * If the question refers to a visible element or window on screen (like an error message, a function/code snippet, a dialog box, or a setting), tightly box that relevant area so Pointy anchors its red cursor right beside the subject being explained!
-     * If it is a general question not tied to any single visible button, provide a bounding box of the active application/window or leave "steps": [] if general.
-   - "found": true
+CONVERSATIONAL MEMORY & ASSISTANT INTELLIGENCE:
+1. MULTI-TURN CONTINUITY: You maintain full conversational memory across questions. If the user asks follow-up questions (e.g., "how do I do that?", "why?", "explain step 2", "where is that on my screen?"), continue the conversation seamlessly using prior turns.
+2. ADAPTIVE DEPTH:
+   - SPATIAL / POINTING QUESTIONS (e.g. "where is...", "find...", "point to...", "show me...", "click on..."):
+     * "mode": "pointer"
+     * "reply": A concise, natural spoken answer (1-2 sentences, under 18 words) suitable for Google Cloud TTS.
+     * "detailed_explanation": A concise summary (or same as reply).
+     * "steps": Pinpoint the EXACT bounding box [ymin, xmin, ymax, xmax] tightly enclosing the requested element.
+   - ASSISTANT / EXPLANATORY QUESTIONS (e.g. "explain...", "how does this work?", "why is this error happening?", "write a script to...", "how do I configure...", "summarize this page", "help me debug..."):
+     * "mode": "assistant"
+     * "reply": A clear, conversational spoken summary (2-3 sentences, 25-45 words) capturing the key takeaway naturally for voice.
+     * "detailed_explanation": A comprehensive, multi-paragraph, thorough answer formatted with markdown:
+       - Use clean headings (###) and bullet points.
+       - Include full code snippets in proper code blocks (\`\`\`lang ... \`\`\`) with syntax highlighting.
+       - Explain concepts in depth without artificial brevity whenever the question calls for it.
+     * "steps": If the question refers to a visible window or element on screen (like an error dialog, a code block, or a tool), tightly box it so Pointy can anchor beside it; otherwise leave "steps": [].
+     * "found": true
 
 VISUAL GROUNDING INSTRUCTIONS (CRITICAL FOR PINPOINT ACCURACY):
 1. Carefully scan the screenshot to identify the active window, application, or desktop area relevant to the user's question.
@@ -130,8 +129,21 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
 }`;
 
     try {
-      const requestPayload = {
-        contents: [
+      const contents = [];
+
+      // Append multi-turn history if present
+      if (Array.isArray(history) && history.length > 0) {
+        for (const turn of history) {
+          if (turn.role && turn.parts && turn.parts.length > 0) {
+            contents.push(turn);
+          }
+        }
+      }
+
+      // Current turn with visual grounding screenshot + latest question
+      contents.push({
+        role: 'user',
+        parts: [
           { text: systemPrompt },
           {
             inlineData: {
@@ -139,11 +151,17 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
               data: base64Image,
             },
           },
-          { text: `User's question (language: ${language}): "${question}"` },
+          {
+            text: `User's question (language: ${language}): "${question}"\n\nRemember: Maintain conversational continuity with prior turns above if this is a follow-up inquiry.`
+          },
         ],
+      });
+
+      const requestPayload = {
+        contents,
         config: {
-          temperature: 0.1,
-          maxOutputTokens: 1500,
+          temperature: 0.15,
+          maxOutputTokens: 2048,
           responseMimeType: 'application/json',
         },
       };

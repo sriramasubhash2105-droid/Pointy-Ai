@@ -13,15 +13,37 @@ const cursorLoadingSpinner = document.getElementById('cursor-loading-spinner');
 
 const cursorAnswerCard = document.getElementById('cursor-answer-card');
 const answerCardText = document.getElementById('answer-card-text');
+const chatStream = document.getElementById('chat-stream');
+const cardChatInput = document.getElementById('card-chat-input');
+const cardChatMic = document.getElementById('card-chat-mic');
+const cardChatSend = document.getElementById('card-chat-send');
+const btnNewChat = document.getElementById('btn-new-chat');
 const answerCardFooter = document.getElementById('answer-card-footer');
 const answerStepInfo = document.getElementById('answer-step-info');
 const answerNextBtn = document.getElementById('answer-next-btn');
 const answerSkipBtn = document.getElementById('answer-skip-btn');
 const answerCloseBtn = document.getElementById('answer-close-btn');
 const badgeTitle = document.getElementById('badge-title');
+const cardResizeHandle = document.getElementById('card-resize-handle');
 
+let activeConversation = null;
 let currentAnswerMode = 'pointer'; // 'pointer' | 'assistant'
 let answerDismissTimer = null;
+let standbyGlideTimer = null;
+
+function cancelStandbyGlide() {
+  if (standbyGlideTimer) {
+    clearTimeout(standbyGlideTimer);
+    standbyGlideTimer = null;
+  }
+}
+
+// Multi-turn chat session state: true ONLY when user asked another question right after one question
+let isChatModeActive = false;
+let lastAnswerTurn = null; // { question, result, step }
+let userHasManuallyResized = false;
+let manualCardWidth = null;
+let manualCardHeight = null;
 
 const textInputContainer = document.getElementById('text-input-container');
 const textInput = document.getElementById('text-input');
@@ -62,9 +84,24 @@ async function init() {
   setupEventListeners();
   setupIPCListeners();
   setupSpeechRecognition();
+  setupCardResize();
 
-  // Make sure cursor is in idle floating state on screen
-  resetToStandby();
+  // Load existing conversation memory reference in background
+  try {
+    if (window.pointyAPI.getActiveConversation) {
+      activeConversation = await window.pointyAPI.getActiveConversation();
+    }
+  } catch (e) {
+    console.warn('[Overlay] Notice loading active conversation:', e);
+  }
+
+  // Cursor is already placed in resting corner via CSS idle class
+  currentState = 'idle';
+  aiCursor.classList.add('idle');
+  aiCursor.classList.remove('flying', 'following', 'listening', 'thinking', 'pointing');
+  cursorAnswerCard.classList.add('hidden');
+  cursorLoadingSpinner?.classList.add('hidden');
+  hideTextInput();
 
   console.log('[Pointy Spatial Cursor] Engine ready');
 }
@@ -110,7 +147,14 @@ function setupIPCListeners() {
   });
 
   window.pointyAPI.onPointAt((data) => {
-    handlePointAt(data.result, data.audioBase64);
+    handlePointAt(data.result, data.audioBase64, data.conversation, data.question);
+  });
+
+  window.pointyAPI.onConversationUpdated?.((data) => {
+    if (data && data.conversation) {
+      activeConversation = data.conversation;
+      renderConversation(activeConversation, data.latestResult);
+    }
   });
 
   window.pointyAPI.onPlayAudio((audioBase64) => {
@@ -120,6 +164,7 @@ function setupIPCListeners() {
   window.pointyAPI.onError((message) => {
     aiCursor.classList.remove('thinking');
     cursorLoadingSpinner?.classList.add('hidden');
+    removeThinkingTurn();
     showAnswerBesideCursor(`⚠️ ${message}`, null);
     setTimeout(() => {
       resetToStandby();
@@ -138,7 +183,7 @@ function setupEventListeners() {
   let isMouseHoveringInteractive = false;
   window.addEventListener('mousemove', (event) => {
     const isInteractive = !!event.target.closest(
-      '#cursor-answer-card, #text-input-container, button, input, .ai-cursor, .cursor-hover-menu'
+      '#cursor-answer-card, #text-input-container, button, input, .ai-cursor, .cursor-hover-menu, .chat-turn, .code-copy-btn, .card-resize-handle'
     );
     if (isInteractive !== isMouseHoveringInteractive) {
       isMouseHoveringInteractive = isInteractive;
@@ -194,6 +239,60 @@ function setupEventListeners() {
     resetToStandby();
   });
 
+  // Start New Chat session button (resets multi-turn chat to fresh state)
+  btnNewChat?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      if (window.pointyAPI.startNewChat) {
+        const newConv = await window.pointyAPI.startNewChat();
+        activeConversation = newConv;
+      }
+    } catch (err) {
+      console.warn('[Overlay] startNewChat error:', err);
+    }
+    isChatModeActive = false;
+    lastAnswerTurn = null;
+    userHasManuallyResized = false;
+    manualCardWidth = null;
+    manualCardHeight = null;
+    resetToStandby();
+  });
+
+  // Follow-up card input bar: typing & send
+  cardChatSend?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    submitFollowUpQuestion();
+  });
+
+  cardChatInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      submitFollowUpQuestion();
+    }
+  });
+
+  // Follow-up card input bar: voice mic
+  cardChatMic?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleFollowUpMicClick();
+  });
+
+  // Keep answer card open while reading or interacting
+  cursorAnswerCard?.addEventListener('mouseenter', () => {
+    if (answerDismissTimer) {
+      clearTimeout(answerDismissTimer);
+      answerDismissTimer = null;
+    }
+  });
+
+  cardChatInput?.addEventListener('focus', () => {
+    if (answerDismissTimer) {
+      clearTimeout(answerDismissTimer);
+      answerDismissTimer = null;
+    }
+  });
+
   // Text input fallback
   textSubmit.addEventListener('click', submitTypedQuestion);
   textInput.addEventListener('keydown', (e) => {
@@ -212,6 +311,7 @@ function setupEventListeners() {
 
 // ─── Red Cursor Pop-Out Logic (From User's Mouse Position) ───────────
 function popOutCursor(x, y) {
+  cancelStandbyGlide();
   const clampX = Math.max(0, Math.min(x || window.innerWidth / 2, window.innerWidth - 10));
   const clampY = Math.max(0, Math.min(y || window.innerHeight / 2, window.innerHeight - 10));
 
@@ -324,6 +424,9 @@ function playStartupIntro(mousePos) {
 
 // ─── State Management ────────────────────────────────────────────────
 function setAppState(state) {
+  if (state !== 'idle') {
+    cancelStandbyGlide();
+  }
   currentState = state;
   aiCursor.classList.remove('listening', 'thinking', 'pointing');
   if (state !== 'idle') {
@@ -514,6 +617,28 @@ function stopVoiceSession() {
 
 function submitVoiceQuestion(text) {
   setAppState('thinking');
+
+  // If the answer card was open when the user asked this question, it becomes a chat!
+  const cardIsOpen = cursorAnswerCard && !cursorAnswerCard.classList.contains('hidden');
+  if (isChatModeActive || (cardIsOpen && lastAnswerTurn)) {
+    if (!isChatModeActive && lastAnswerTurn) {
+      isChatModeActive = true;
+      cursorAnswerCard.classList.add('chat-mode');
+      applyCardSizing('', true);
+      chatStream.innerHTML = '';
+      if (lastAnswerTurn.question) {
+        appendUserTurn(lastAnswerTurn.question);
+      }
+      if (lastAnswerTurn.result) {
+        const prevAst = createAssistantTurnElement(lastAnswerTurn.result);
+        chatStream.appendChild(prevAst);
+        attachStreamListeners();
+      }
+    }
+    appendUserTurn(text);
+    appendThinkingTurn();
+  }
+
   window.pointyAPI.sendTypedQuestion(text);
 }
 
@@ -527,7 +652,8 @@ function renderMarkdownToHtml(md) {
 
   // Code blocks: ```lang\ncode\n```
   html = html.replace(/```(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)```/g, (match, code) => {
-    return `<pre><code>${code.trim()}</code></pre>`;
+    const raw = code.trim();
+    return `<div class="code-block-wrapper"><button class="code-copy-btn" type="button">Copy</button><pre><code>${raw}</code></pre></div>`;
   });
 
   // Inline code: `code`
@@ -558,7 +684,7 @@ function renderMarkdownToHtml(md) {
   html = parts.map(p => {
     p = p.trim();
     if (!p) return '';
-    if (p.startsWith('<h') || p.startsWith('<pre') || p.startsWith('<ul>') || p.startsWith('<ol>')) {
+    if (p.startsWith('<h') || p.startsWith('<div class="code-block-wrapper"') || p.startsWith('<pre') || p.startsWith('<ul>') || p.startsWith('<ol>')) {
       return p;
     }
     return `<p>${p.replace(/\n/g, '<br>')}</p>`;
@@ -567,8 +693,326 @@ function renderMarkdownToHtml(md) {
   return html;
 }
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// ─── Single Answer & Multi-Turn Chat Engine ───────────────────────────
+
+/**
+ * Creates an assistant turn DOM node for any answer result
+ */
+function createAssistantTurnElement(result) {
+  const astDiv = document.createElement('div');
+  astDiv.className = 'chat-turn assistant';
+
+  let inner = '';
+  const spoken = result.reply || '';
+  const detailed = result.detailed_explanation || spoken;
+  if (spoken && detailed && spoken !== detailed && spoken.length < detailed.length) {
+    inner += `<div class="chat-spoken-pill"><span>🔊</span><span>${escapeHtml(spoken)}</span></div>`;
+  }
+
+  inner += `<div class="chat-msg-text">${renderMarkdownToHtml(detailed)}</div>`;
+
+  if (result.steps && result.steps.length > 0) {
+    const step = result.steps[0];
+    const label = step.label || step.instruction || 'Target Location';
+    inner += `<div class="chat-target-badge" title="Point at this target again"><span>📍</span><span>Pointed to: ${escapeHtml(label)}</span></div>`;
+  }
+
+  astDiv.innerHTML = inner;
+  return astDiv;
+}
+
+/**
+ * Attaches copy button and target badge click listeners inside chat stream
+ */
+function attachStreamListeners() {
+  if (!chatStream) return;
+  chatStream.querySelectorAll('.code-copy-btn').forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const codeBlock = btn.nextElementSibling?.querySelector('code') || btn.parentElement?.querySelector('code');
+      if (codeBlock) {
+        navigator.clipboard.writeText(codeBlock.innerText).then(() => {
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+        });
+      }
+    };
+  });
+
+  chatStream.querySelectorAll('.chat-target-badge').forEach((badge) => {
+    badge.onclick = (e) => {
+      e.stopPropagation();
+      if (currentSteps && currentSteps.length > 0) {
+        pointToStep(0, null, null, isChatModeActive);
+      }
+    };
+  });
+}
+
+/**
+ * Applies dynamic sizing tiers according to the answer's demand:
+ * - size-compact: short 1-line or 2-line answers (~310px width)
+ * - size-medium: 2-4 sentences or short lists (~410px width)
+ * - size-expanded: long explanations, code blocks, or multi-turn chat (~520px width)
+ * Respects user manual resizing if dragged.
+ */
+function applyCardSizing(content = '', isChat = false) {
+  if (userHasManuallyResized && manualCardWidth && manualCardHeight) {
+    cursorAnswerCard.classList.add('manually-resized');
+    cursorAnswerCard.style.width = `${manualCardWidth}px`;
+    cursorAnswerCard.style.height = `${manualCardHeight}px`;
+    return;
+  }
+
+  cursorAnswerCard.classList.remove('size-compact', 'size-medium', 'size-expanded', 'chat-mode', 'manually-resized');
+  cursorAnswerCard.style.width = '';
+  cursorAnswerCard.style.height = '';
+
+  if (isChat) {
+    cursorAnswerCard.classList.add('chat-mode', 'size-expanded');
+    return;
+  }
+
+  const text = content || '';
+  const textLength = text.length;
+  const hasCode = text.includes('```') || text.includes('`') || text.includes('<pre');
+  const hasList = text.includes('<li>') || text.includes('\n- ') || text.includes('\n1. ');
+  const hasHeading = text.includes('<h') || text.includes('#');
+
+  if (hasCode || (hasHeading && hasList) || textLength > 300) {
+    cursorAnswerCard.classList.add('size-expanded');
+  } else if (textLength > 110 || hasList || hasHeading) {
+    cursorAnswerCard.classList.add('size-medium');
+  } else {
+    cursorAnswerCard.classList.add('size-compact');
+  }
+}
+
+/**
+ * Setup interactive drag resizing for the answer card corner
+ */
+function setupCardResize() {
+  if (!cardResizeHandle || !cursorAnswerCard) return;
+
+  let startX = 0, startY = 0, startW = 0, startH = 0;
+  let isResizing = false;
+
+  function onMouseMove(e) {
+    if (!isResizing) return;
+    const isFlipped = cursorAnswerCard.classList.contains('flipped-left');
+    const deltaX = isFlipped ? (startX - e.clientX) : (e.clientX - startX);
+    const deltaY = e.clientY - startY;
+
+    const newW = Math.max(260, Math.min(window.innerWidth - 60, startW + deltaX));
+    const newH = Math.max(120, Math.min(window.innerHeight - 60, startH + deltaY));
+
+    userHasManuallyResized = true;
+    manualCardWidth = newW;
+    manualCardHeight = newH;
+
+    cursorAnswerCard.classList.add('manually-resized');
+    cursorAnswerCard.style.width = `${newW}px`;
+    cursorAnswerCard.style.height = `${newH}px`;
+  }
+
+  function onMouseUp() {
+    if (!isResizing) return;
+    isResizing = false;
+    cardResizeHandle.classList.remove('resizing');
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+  }
+
+  cardResizeHandle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isResizing = true;
+    cardResizeHandle.classList.add('resizing');
+    startX = e.clientX;
+    startY = e.clientY;
+    startW = cursorAnswerCard.offsetWidth;
+    startH = cursorAnswerCard.offsetHeight;
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+/**
+ * Renders ONLY the answer the user asked for (Single Answer Mode).
+ * Storing conversation in memory, but showing only the direct answer in the floating card.
+ */
+function renderSingleAnswer(result, question) {
+  if (!chatStream) return;
+  removeThinkingTurn();
+
+  chatStream.innerHTML = '';
+  const astDiv = createAssistantTurnElement(result);
+  chatStream.appendChild(astDiv);
+  attachStreamListeners();
+
+  const answerText = result.detailed_explanation || result.reply || '';
+  applyCardSizing(answerText, false);
+
+  if (badgeTitle) {
+    if (result.steps && result.steps.length > 0 && result.steps[0].label) {
+      badgeTitle.textContent = result.steps[0].label;
+    } else {
+      badgeTitle.textContent = 'Pointy Assistant';
+    }
+  }
+}
+
+/**
+ * Optional full conversation renderer (if requested)
+ */
+function renderConversation(conv) {
+  if (!chatStream) return;
+  removeThinkingTurn();
+
+  if (!conv || !conv.messages || conv.messages.length === 0) {
+    chatStream.innerHTML = `
+      <div class="chat-turn assistant">
+        <div class="chat-msg-text">
+          <p>✨ <strong>Hi! I am Pointy AI</strong>, your desktop companion.</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  chatStream.innerHTML = '';
+  for (const msg of conv.messages) {
+    if (msg.role === 'user') {
+      appendUserTurn(msg.text || '');
+    } else if (msg.role === 'assistant') {
+      const astDiv = createAssistantTurnElement(msg);
+      chatStream.appendChild(astDiv);
+    }
+  }
+  attachStreamListeners();
+  chatStream.scrollTop = chatStream.scrollHeight;
+}
+
+function appendUserTurn(text) {
+  if (!chatStream) return;
+  const userDiv = document.createElement('div');
+  userDiv.className = 'chat-turn user';
+  userDiv.textContent = text;
+  chatStream.appendChild(userDiv);
+  chatStream.scrollTop = chatStream.scrollHeight;
+}
+
+function appendThinkingTurn() {
+  if (!chatStream) return;
+  removeThinkingTurn();
+  const thinkDiv = document.createElement('div');
+  thinkDiv.id = 'chat-thinking-turn';
+  thinkDiv.className = 'chat-turn thinking';
+  thinkDiv.innerHTML = `
+    <span>Pointy is thinking</span>
+    <div class="thinking-dots">
+      <span class="thinking-dot"></span>
+      <span class="thinking-dot"></span>
+      <span class="thinking-dot"></span>
+    </div>
+  `;
+  chatStream.appendChild(thinkDiv);
+  chatStream.scrollTop = chatStream.scrollHeight;
+}
+
+function removeThinkingTurn() {
+  const existing = document.getElementById('chat-thinking-turn');
+  if (existing) existing.remove();
+}
+
+/**
+ * Follow-up submission: Turns into a multi-turn chat when the user asks another question right after!
+ */
+function submitFollowUpQuestion() {
+  if (!cardChatInput) return;
+  const question = cardChatInput.value.trim();
+  if (!question) return;
+
+  cardChatInput.value = '';
+
+  if (answerDismissTimer) {
+    clearTimeout(answerDismissTimer);
+    answerDismissTimer = null;
+  }
+
+  cursorAnswerCard.classList.remove('hidden');
+
+  // It only becomes a chat when the user asks another question right after one question!
+  if (!isChatModeActive) {
+    isChatModeActive = true;
+    cursorAnswerCard.classList.add('chat-mode');
+    applyCardSizing('', true);
+
+    // Reconstruct the previous turn so the user sees the ongoing conversation
+    if (lastAnswerTurn) {
+      chatStream.innerHTML = '';
+      if (lastAnswerTurn.question) {
+        appendUserTurn(lastAnswerTurn.question);
+      }
+      if (lastAnswerTurn.result) {
+        const prevAst = createAssistantTurnElement(lastAnswerTurn.result);
+        chatStream.appendChild(prevAst);
+        attachStreamListeners();
+      }
+    }
+  }
+
+  appendUserTurn(question);
+  appendThinkingTurn();
+
+  setAppState('thinking');
+  window.pointyAPI.sendTypedQuestion(question);
+}
+
+function handleFollowUpMicClick() {
+  if (currentState === 'listening') {
+    cardChatMic?.classList.remove('recording');
+    stopVoiceSession();
+  } else {
+    if (answerDismissTimer) {
+      clearTimeout(answerDismissTimer);
+      answerDismissTimer = null;
+    }
+
+    if (!isChatModeActive && lastAnswerTurn) {
+      isChatModeActive = true;
+      cursorAnswerCard.classList.add('chat-mode');
+      applyCardSizing('', true);
+      chatStream.innerHTML = '';
+      if (lastAnswerTurn.question) {
+        appendUserTurn(lastAnswerTurn.question);
+      }
+      if (lastAnswerTurn.result) {
+        const prevAst = createAssistantTurnElement(lastAnswerTurn.result);
+        chatStream.appendChild(prevAst);
+        attachStreamListeners();
+      }
+    }
+
+    cardChatMic?.classList.add('recording');
+    startVoiceSession();
+  }
+}
+
 // ─── Pointing Animation & Target Placement ────────────────────────────
-function handlePointAt(result, audioBase64 = null) {
+function handlePointAt(result, audioBase64 = null, conversation = null, question = null) {
+  cancelStandbyGlide();
   if (answerDismissTimer) {
     clearTimeout(answerDismissTimer);
     answerDismissTimer = null;
@@ -576,58 +1020,66 @@ function handlePointAt(result, audioBase64 = null) {
 
   aiCursor.classList.remove('thinking');
   cursorLoadingSpinner?.classList.add('hidden');
+  cardChatMic?.classList.remove('recording');
+
+  if (conversation) {
+    activeConversation = conversation;
+  }
 
   if (!result) {
     showAnswerBesideCursor("I couldn't process that question. Please try asking again!", null, false);
-    answerDismissTimer = setTimeout(() => resetToStandby(), 5000);
     return;
   }
 
-  const isAssistant = result.mode === 'assistant' ||
-    (!result.mode && result.detailed_explanation && result.detailed_explanation.length > 120);
-  currentAnswerMode = isAssistant ? 'assistant' : 'pointer';
+  const answerContent = result.detailed_explanation || result.reply;
 
-  // If question was not found and not an assistant explanation
-  if (!result.found && !isAssistant) {
+  if (isChatModeActive) {
+    // In active chat mode: append the new answer into the stream!
+    removeThinkingTurn();
+    const newAstDiv = createAssistantTurnElement(result);
+    chatStream.appendChild(newAstDiv);
+    attachStreamListeners();
+    chatStream.scrollTop = chatStream.scrollHeight;
+    applyCardSizing('', true);
+    lastAnswerTurn = { question, result, step: result.steps?.[0] || null };
+  } else {
+    // Single answer mode: display ONLY this answer!
+    lastAnswerTurn = { question, result, step: result.steps?.[0] || null };
+    renderSingleAnswer(result, question);
+  }
+
+  // If question was not found and not a detailed explanation
+  if (!result.found && !result.detailed_explanation) {
     const fallbackText = result.reply || "I couldn't locate what you asked for. Try asking another question!";
-    showAnswerBesideCursor(fallbackText, null, false);
+    showAnswerBesideCursor(fallbackText, null, isChatModeActive);
     if (audioBase64) {
-      playAudioBase64(audioBase64, false);
-    } else {
-      answerDismissTimer = setTimeout(() => resetToStandby(), 5500);
+      playAudioBase64(audioBase64, isChatModeActive);
     }
     return;
   }
 
-  const answerContent = isAssistant
-    ? (result.detailed_explanation || result.reply)
-    : (result.reply || result.detailed_explanation);
-
-  // If steps exist, point to the target
+  // If steps exist, point smoothly to the target
   if (result.steps && result.steps.length > 0) {
     currentSteps = result.steps;
     currentStepIndex = 0;
-    pointToStep(0, answerContent, audioBase64, isAssistant);
+    pointToStep(0, answerContent, audioBase64, isChatModeActive);
   } else {
-    // Assistant mode without specific button target: stay in place and display explanation
     currentSteps = [];
     currentStepIndex = 0;
     setAppState('pointing');
     if (audioBase64) {
-      playAudioBase64(audioBase64, isAssistant);
-    } else {
-      answerDismissTimer = setTimeout(() => {
-        if (currentState === 'pointing') resetToStandby();
-      }, isAssistant ? 35000 : 6000);
+      playAudioBase64(audioBase64, isChatModeActive);
     }
-    showAnswerBesideCursor(answerContent, null, isAssistant);
+    showAnswerBesideCursor(answerContent, null, isChatModeActive);
   }
 }
 
-function pointToStep(index, fullText = null, audioBase64 = null, isAssistant = false) {
+function pointToStep(index, fullText = null, audioBase64 = null, isChat = false) {
+  cancelStandbyGlide();
   if (index >= currentSteps.length) {
-    const delay = isAssistant ? 35000 : 4000;
-    answerDismissTimer = setTimeout(() => resetToStandby(), delay);
+    if (!isChat) {
+      answerDismissTimer = setTimeout(() => resetToStandby(), 7000);
+    }
     return;
   }
 
@@ -659,15 +1111,15 @@ function pointToStep(index, fullText = null, audioBase64 = null, isAssistant = f
 
   // 2. Play Google Cloud TTS speech as cursor points!
   if (audioBase64) {
-    playAudioBase64(audioBase64, isAssistant);
+    playAudioBase64(audioBase64, isChat);
   } else {
-    // If TTS is unavailable, keep cursor pointing so user sees it clearly
-    const delay = isAssistant ? 35000 : 6000;
-    answerDismissTimer = setTimeout(() => {
-      if (currentState === 'pointing') {
-        resetToStandby();
-      }
-    }, delay);
+    if (!isChat) {
+      answerDismissTimer = setTimeout(() => {
+        if (currentState === 'pointing') {
+          resetToStandby();
+        }
+      }, 7000);
+    }
   }
 
   // 3. Keep answer card hidden while flying
@@ -678,7 +1130,7 @@ function pointToStep(index, fullText = null, audioBase64 = null, isAssistant = f
   // When cursor arrives at target (~420ms), reveal answer text card beside cursor
   setTimeout(() => {
     spawnParticles(cx, cy, 14);
-    showAnswerBesideCursor(displayText, step, isAssistant);
+    showAnswerBesideCursor(displayText, step, isChat);
   }, 420);
 }
 
@@ -687,43 +1139,14 @@ function goToNextStep() {
   if (currentStepIndex >= currentSteps.length) {
     resetToStandby();
   } else {
-    pointToStep(currentStepIndex, null, null, currentAnswerMode === 'assistant');
+    pointToStep(currentStepIndex, null, null, isChatModeActive);
   }
 }
 
 // ─── Display Answer Text Beside Red Cursor ───────────────────────────
-function showAnswerBesideCursor(text, step, isAssistant = false) {
-  if (isAssistant) {
-    cursorAnswerCard.classList.add('assistant-mode');
-    if (badgeTitle) badgeTitle.textContent = 'Pointy Assistant';
-    answerCardText.innerHTML = renderMarkdownToHtml(text);
-  } else {
-    cursorAnswerCard.classList.remove('assistant-mode');
-    if (badgeTitle) badgeTitle.textContent = 'Pointy Navigator';
-    answerCardText.textContent = text;
-  }
-
+function showAnswerBesideCursor(text, step, isChat = false) {
   cursorAnswerCard.classList.remove('hidden');
-
-  // Adjust positioning to stay on screen (Smart boundary detection)
-  const cardWidth = isAssistant ? 460 : 320;
-  const cardHeight = isAssistant ? 380 : 160;
-  const cursorX = currentCursorPos.x;
-  const cursorY = currentCursorPos.y;
-
-  // Check if overflowing on right side
-  if (cursorX + cardWidth + 50 > window.innerWidth) {
-    cursorAnswerCard.classList.add('flipped-left');
-  } else {
-    cursorAnswerCard.classList.remove('flipped-left');
-  }
-
-  // Check vertical position so it doesn't run off bottom
-  if (cursorY + cardHeight > window.innerHeight) {
-    cursorAnswerCard.style.top = `-${cardHeight - 40}px`;
-  } else {
-    cursorAnswerCard.style.top = '-16px';
-  }
+  repositionAnswerCard();
 
   // Multi-step counter & buttons
   if (currentSteps && currentSteps.length > 1) {
@@ -739,8 +1162,29 @@ function showAnswerBesideCursor(text, step, isAssistant = false) {
   }
 }
 
+function repositionAnswerCard() {
+  const cardWidth = cursorAnswerCard.offsetWidth || (isChatModeActive ? 520 : 320);
+  const cardHeight = cursorAnswerCard.offsetHeight || (isChatModeActive ? 400 : 160);
+  const cursorX = currentCursorPos.x;
+  const cursorY = currentCursorPos.y;
+
+  // Check if overflowing on right side
+  if (cursorX + cardWidth + 50 > window.innerWidth) {
+    cursorAnswerCard.classList.add('flipped-left');
+  } else {
+    cursorAnswerCard.classList.remove('flipped-left');
+  }
+
+  // Check vertical position so it doesn't run off bottom
+  if (cursorY + cardHeight > window.innerHeight) {
+    cursorAnswerCard.style.top = `-${Math.max(80, cardHeight - 50)}px`;
+  } else {
+    cursorAnswerCard.style.top = '-16px';
+  }
+}
+
 // ─── Google Cloud TTS Audio Playback (High-fidelity voice) ───────────
-function playAudioBase64(base64, isAssistant = false) {
+function playAudioBase64(base64, isChat = false) {
   if (!base64) return;
   try {
     if (activeAudio) {
@@ -765,14 +1209,14 @@ function playAudioBase64(base64, isAssistant = false) {
     activeAudio.onended = () => {
       URL.revokeObjectURL(url);
       if (speakingIndicator) speakingIndicator.style.opacity = '0.3';
-      // For assistant explanations: keep open for 30 seconds so user can read!
-      // For quick pointing: 4.5s is plenty.
-      const readTime = isAssistant ? 30000 : 4500;
-      answerDismissTimer = setTimeout(() => {
-        if (currentState === 'pointing') {
-          resetToStandby();
-        }
-      }, readTime);
+
+      if (!isChat) {
+        answerDismissTimer = setTimeout(() => {
+          if (currentState === 'pointing') {
+            resetToStandby();
+          }
+        }, 7000);
+      }
     };
 
     activeAudio.play().catch((e) => console.warn('[Pointy] Audio play failed:', e));
@@ -783,6 +1227,7 @@ function playAudioBase64(base64, isAssistant = false) {
 
 // ─── Reset to Standby (Esc returns to right bottom side of window) ────
 function resetToStandby() {
+  cancelStandbyGlide();
   if (answerDismissTimer) {
     clearTimeout(answerDismissTimer);
     answerDismissTimer = null;
@@ -790,7 +1235,16 @@ function resetToStandby() {
 
   isFollowingMouse = false;
   aiCursor.classList.remove('following', 'listening', 'thinking', 'pointing', 'pop-out');
-  cursorAnswerCard.classList.remove('assistant-mode');
+
+  // Reset multi-turn chat session state and manual resize overrides
+  isChatModeActive = false;
+  lastAnswerTurn = null;
+  userHasManuallyResized = false;
+  manualCardWidth = null;
+  manualCardHeight = null;
+  cursorAnswerCard.style.width = '';
+  cursorAnswerCard.style.height = '';
+  cursorAnswerCard.classList.remove('chat-mode', 'size-compact', 'size-medium', 'size-expanded', 'manually-resized', 'assistant-mode');
 
   if (activeAudio) {
     activeAudio.pause();
@@ -803,13 +1257,14 @@ function resetToStandby() {
   aiCursor.style.left = (window.innerWidth - 75) + 'px';
   aiCursor.style.top = (window.innerHeight - 105) + 'px';
 
-  setTimeout(() => {
+  standbyGlideTimer = setTimeout(() => {
     aiCursor.classList.remove('flying');
     aiCursor.style.left = 'auto';
     aiCursor.style.top = 'auto';
     aiCursor.style.bottom = '72px';
     aiCursor.style.right = '45px';
     aiCursor.classList.add('idle');
+    standbyGlideTimer = null;
   }, 450);
 
   cursorAnswerCard.classList.add('hidden');
@@ -821,7 +1276,6 @@ function resetToStandby() {
   finalTranscript = '';
   currentState = 'idle';
 
-  window.pointyAPI.pointingComplete();
 }
 
 // ─── Text Input Fallback ─────────────────────────────────────────────
