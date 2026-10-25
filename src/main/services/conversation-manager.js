@@ -78,6 +78,10 @@ class ConversationManager {
 
   getAllConversations() {
     return Object.values(this.conversations)
+      .map(c => ({
+        ...c,
+        isPinned: !!(c.pinned || c.isPinned),
+      }))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   }
 
@@ -157,6 +161,53 @@ class ConversationManager {
     return history;
   }
 
+  getConversation(id) {
+    return this.conversations[id] || null;
+  }
+
+  deleteConversation(id) {
+    if (this.conversations[id]) {
+      delete this.conversations[id];
+      if (this.activeId === id) {
+        const remaining = Object.keys(this.conversations);
+        this.activeId = remaining.length > 0 ? remaining[0] : null;
+        if (!this.activeId) {
+          this.startNewConversation();
+        }
+      }
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  renameConversation(id, newTitle) {
+    if (this.conversations[id] && newTitle) {
+      this.conversations[id].title = newTitle.trim();
+      this.conversations[id].updatedAt = Date.now();
+      this.save();
+      return this.conversations[id];
+    }
+    return null;
+  }
+
+  pinConversation(id, isPinned = true) {
+    if (this.conversations[id]) {
+      this.conversations[id].pinned = !!isPinned;
+      this.conversations[id].updatedAt = Date.now();
+      this.save();
+      return this.conversations[id];
+    }
+    return null;
+  }
+
+  clearAllConversations() {
+    this.conversations = {};
+    this.activeId = null;
+    const fresh = this.startNewConversation();
+    return [fresh];
+  }
+
   clearActiveConversation() {
     const conv = this.getActiveConversation();
     conv.messages = [];
@@ -166,4 +217,5 @@ class ConversationManager {
   }
 }
 
-module.exports = { ConversationManager };
+module.exports = ConversationManager;
+module.exports.ConversationManager = ConversationManager;

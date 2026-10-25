@@ -369,148 +369,333 @@ body {
   text-overflow: ellipsis;
 }
 
-/* ─── Floating Assistant Card (Glassmorphic & Translucent) ────── */
-.cursor-answer-card {
-  position: absolute;
-  left: 36px;
-  top: -10px;
-  width: 320px;
-  min-width: 270px;
-  max-width: min(560px, calc(100vw - 70px));
-  background: rgba(18, 14, 22, 0.76);
-  backdrop-filter: blur(28px) saturate(190%);
-  -webkit-backdrop-filter: blur(28px) saturate(190%);
-  border: 1px solid rgba(255, 45, 85, 0.35);
-  border-radius: 18px;
-  box-shadow:
-    0 20px 50px rgba(0, 0, 0, 0.6),
-    0 0 24px var(--red-glow-subtle),
-    inset 0 1px 1px rgba(255, 255, 255, 0.16);
-  padding: 16px;
+/* ─── Minimalist Outgoing Speech Bubble (Red as Pointy) ───────────── */
+.speech-bubble-wrapper {
+  position: fixed;
+  z-index: 2147483646;
   pointer-events: auto;
-  opacity: 1;
-  z-index: 1000000;
   display: flex;
-  flex-direction: column;
-  transition: opacity 0.22s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), width 0.22s cubic-bezier(0.16, 1, 0.3, 1), min-width 0.22s ease;
+  align-items: flex-start;
+  transition: opacity 0.22s ease, left 0.15s ease-out, right 0.15s ease-out, top 0.15s ease-out;
+  user-select: text;
+  will-change: left, right, top;
 }
 
-/* Dynamic Sizing Tiers (Adapts smoothly to answer demand) */
-.cursor-answer-card.size-compact {
-  width: 310px;
-  max-width: 350px;
-}
-.cursor-answer-card.size-compact .chat-stream {
-  max-height: 200px;
-}
-
-.cursor-answer-card.size-medium {
-  width: 410px;
-  max-width: 450px;
-}
-.cursor-answer-card.size-medium .chat-stream {
-  max-height: 310px;
-}
-
-.cursor-answer-card.size-expanded,
-.cursor-answer-card.chat-mode,
-.cursor-answer-card.assistant-mode {
-  width: 520px;
-  max-width: min(560px, calc(100vw - 70px));
-}
-.cursor-answer-card.size-expanded .chat-stream,
-.cursor-answer-card.chat-mode .chat-stream,
-.cursor-answer-card.assistant-mode .chat-stream {
-  max-height: 440px;
-}
-
-/* User Manual Resize Override */
-.cursor-answer-card.manually-resized {
-  transition: none !important;
-  max-width: calc(100vw - 40px) !important;
-  max-height: calc(100vh - 40px) !important;
-}
-.cursor-answer-card.manually-resized .answer-card-body {
-  flex: 1;
-  overflow: hidden;
-}
-.cursor-answer-card.manually-resized .chat-stream {
-  max-height: 100% !important;
-  flex: 1;
-}
-
-/* Only show 'New Chat' button when in an active multi-turn chat session */
-.cursor-answer-card:not(.chat-mode) #btn-new-chat {
-  display: none;
-}
-
-/* Interactive Corner Resize Handle */
-.card-resize-handle {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  width: 14px;
-  height: 14px;
-  cursor: nwse-resize;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.4;
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  user-select: none;
-  z-index: 10;
-}
-
-.cursor-answer-card.flipped-left .card-resize-handle {
-  right: auto;
-  left: 6px;
-  cursor: nesw-resize;
-  transform: scaleX(-1);
-}
-
-.card-resize-handle:hover,
-.card-resize-handle.resizing {
-  opacity: 1;
-  transform: scale(1.15);
-}
-
-.cursor-answer-card.flipped-left .card-resize-handle:hover,
-.cursor-answer-card.flipped-left .card-resize-handle.resizing {
-  transform: scaleX(-1) scale(1.15);
-}
-
-.cursor-answer-card.hidden {
+.speech-bubble-wrapper.hidden {
   display: none !important;
 }
 
-/* Arrow caret pointing to red cursor */
-.answer-card-caret {
+.chat-speech-bubble {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  background: linear-gradient(180deg, rgba(235, 20, 50, 0.78) 0%, rgba(195, 0, 0, 0.82) 100%);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 18px 18px 4px 18px;
+  padding: 8px 15px;
+  color: #ffffff;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14.5px;
+  line-height: 1.45;
+  font-weight: 500;
+  max-width: min(460px, calc(100vw - 60px));
+  min-width: 32px;
+  box-shadow: 0 6px 24px rgba(213, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.28);
+  box-sizing: border-box;
+  will-change: width, height;
+  transition: width 0.05s ease-out, height 0.12s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+}
+
+.bubble-text-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  color: #ffffff;
+  font-size: 14.5px;
+  line-height: 1.45;
+  font-weight: 500;
+  text-align: left;
+  width: 100%;
+}
+
+/* Seamless pointed tail extending towards Pointy */
+.bubble-tail-svg {
   position: absolute;
-  top: 16px;
-  left: -7px;
-  width: 12px;
+  bottom: -1px;
+  width: 8px;
   height: 12px;
-  background: rgba(18, 14, 22, 0.78);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  border-left: 1px solid rgba(255, 45, 85, 0.35);
-  border-bottom: 1px solid rgba(255, 45, 85, 0.35);
-  transform: rotate(45deg);
+  overflow: visible;
+  pointer-events: none;
 }
 
-/* Card flipped to left side of cursor */
-.cursor-answer-card.flipped-left {
-  left: auto;
-  right: 36px;
-}
-
-.cursor-answer-card.flipped-left .answer-card-caret {
-  left: auto;
+.bubble-tail-svg.tail-right {
   right: -7px;
-  border-left: none;
-  border-bottom: none;
-  border-right: 1px solid rgba(255, 45, 85, 0.35);
-  border-top: 1px solid rgba(255, 45, 85, 0.35);
+}
+
+.bubble-tail-svg.tail-left {
+  left: -7px;
+}
+
+/* Default (bubble is to the right of Pointy): tail on left pointing toward Pointy */
+.speech-bubble-wrapper:not(.flipped-left) .chat-speech-bubble {
+  border-radius: 18px 18px 18px 4px;
+}
+.speech-bubble-wrapper:not(.flipped-left) .tail-right {
+  display: none !important;
+}
+.speech-bubble-wrapper:not(.flipped-left) .tail-left {
+  display: block !important;
+}
+
+/* Flipped-left (bubble is to the left of Pointy): tail on right pointing toward Pointy */
+.speech-bubble-wrapper.flipped-left .chat-speech-bubble {
+  border-radius: 18px 18px 4px 18px;
+}
+.speech-bubble-wrapper.flipped-left .tail-left {
+  display: none !important;
+}
+.speech-bubble-wrapper.flipped-left .tail-right {
+  display: block !important;
+}
+
+/* Blinking text typing cursor */
+.typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 15px;
+  background: #ffffff;
+  margin-left: 2px;
+  vertical-align: -2px;
+  animation: cursor-blink 0.75s infinite;
+}
+
+.typing-cursor.hidden {
+  display: none !important;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Minimalist view full details toggle & body */
+.bubble-details-container {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.bubble-details-container.hidden {
+  display: none !important;
+}
+
+.bubble-details-toggle {
+  align-self: flex-start;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.9;
+  transition: opacity 0.2s, color 0.2s;
+  user-select: none;
+}
+
+.bubble-details-toggle:hover {
+  opacity: 1;
+  color: #ffffff;
+}
+
+.bubble-details-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.35);
+  font-size: 13px;
+  line-height: 1.48;
+  color: #f8fafc;
+  overflow: hidden;
+  max-height: 380px;
+  overflow-y: auto;
+  transition: max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+}
+
+.bubble-details-body.collapsed {
+  display: none;
+  max-height: 0;
+  opacity: 0;
+}
+
+.bubble-details-body pre {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.bubble-details-body code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  color: #fef08a;
+}
+
+.bubble-details-body pre code {
+  color: #ffffff;
+}
+
+/* ─── Speech Bubble Actions: Continue chat / New chat ─────────────── */
+.chat-speech-bubble:has(.bubble-actions:not(.hidden)),
+.chat-speech-bubble:has(.bubble-reply-bar:not(.hidden)) {
+  min-width: 290px;
+}
+
+.bubble-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  width: 100%;
+  animation: bubble-fade-in 0.22s ease-out;
+  box-sizing: border-box;
+}
+
+.bubble-actions.hidden {
+  display: none !important;
+}
+
+@keyframes bubble-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.bubble-action-btn {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 14px;
+  padding: 4px 11px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.bubble-action-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.42);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.bubble-action-btn:active,
+.bubble-action-btn.active {
+  background: rgba(255, 255, 255, 0.32);
+  border-color: rgba(255, 255, 255, 0.55);
+  transform: translateY(0);
+}
+
+.bubble-action-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ─── Speech Bubble Inline Reply Bar ───────────────────────────────── */
+.bubble-reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 16px;
+  padding: 3px 5px 3px 12px;
+  width: 100%;
+  box-sizing: border-box;
+  animation: bubble-fade-in 0.22s ease-out;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.bubble-reply-bar:focus-within {
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(0, 0, 0, 0.38);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.12);
+}
+
+.bubble-reply-bar.hidden {
+  display: none !important;
+}
+
+.bubble-reply-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 4px 0;
+  min-width: 80px;
+}
+
+.bubble-reply-input::placeholder {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.bubble-reply-btn {
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  user-select: none;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.bubble-reply-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
+  border-color: rgba(255, 255, 255, 0.4);
+  transform: scale(1.06);
+}
+
+.bubble-reply-btn.mic.recording {
+  background: #ff1744;
+  animation: mic-pulse 1s infinite alternate;
+}
+
+.bubble-reply-btn.send {
+  font-weight: 700;
 }
 
 /* Answer Card Header */
@@ -680,7 +865,210 @@ body {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
 }
 
-/* Spoken voice summary pill inside turn */
+/* ─── Spoken Speech (Shown Initially) ───────────────────────────────── */
+.spoken-speech-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.spoken-speech-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--red-bright);
+}
+
+.speech-avatar-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--red-bright);
+  box-shadow: 0 0 8px var(--red-glow);
+  animation: dot-pulse 1.4s infinite alternate;
+}
+
+@keyframes dot-pulse {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  100% { transform: scale(1.3); opacity: 1; }
+}
+
+.spoken-speech-bubble {
+  background: linear-gradient(135deg, rgba(255, 23, 68, 0.14) 0%, rgba(30, 20, 28, 0.5) 100%);
+  border: 1px solid rgba(255, 45, 85, 0.35);
+  border-radius: 13px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  line-height: 1.58;
+  color: #ffffff;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  word-break: break-word;
+  position: relative;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: bubble-expand-entrance 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes bubble-expand-entrance {
+  0% {
+    opacity: 0;
+    transform: scale(0.94) translateY(3px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.cursor-answer-card.is-speaking .spoken-speech-bubble {
+  border-color: rgba(255, 45, 85, 0.6);
+  box-shadow: 0 4px 22px rgba(255, 23, 68, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Individual streamed word optical pop-in animation */
+.spoken-text-content {
+  display: inline;
+}
+
+.stream-word {
+  display: inline;
+  opacity: 0;
+  animation: word-fade-in 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes word-fade-in {
+  0% {
+    opacity: 0;
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+/* Blinking text stream cursor */
+.speech-typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background: var(--red-bright);
+  margin-left: 3px;
+  vertical-align: middle;
+  box-shadow: 0 0 6px var(--red-glow);
+  animation: cursor-blink 0.7s infinite alternate;
+}
+
+.speech-typing-cursor.hidden {
+  display: none !important;
+}
+
+@keyframes cursor-blink {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ─── "View Full Details" Toggle Button ─────────────────────────────── */
+.details-toggle-wrapper {
+  display: flex;
+  align-items: center;
+  margin: 6px 0 2px 0;
+}
+
+.btn-toggle-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 45, 85, 0.38);
+  border-radius: 20px;
+  padding: 6px 14px;
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+
+.btn-toggle-details:hover {
+  background: rgba(255, 23, 68, 0.22);
+  border-color: var(--red-bright);
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 4px 16px rgba(255, 23, 68, 0.3);
+}
+
+.btn-toggle-details .toggle-icon {
+  font-size: 12px;
+}
+
+.btn-toggle-details .toggle-arrow {
+  font-size: 12px;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-toggle-details.expanded .toggle-arrow {
+  transform: rotate(180deg);
+}
+
+.btn-toggle-details.ready-pulse {
+  animation: btn-glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes btn-glow-pulse {
+  0%, 100% { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); border-color: rgba(255, 45, 85, 0.38); }
+  50% { box-shadow: 0 0 16px rgba(255, 23, 68, 0.5); border-color: var(--red-bright); }
+}
+
+/* ─── Collapsible Detailed Explanation Container ─────────────────────── */
+.detailed-expansion-container {
+  overflow: hidden;
+  transition: max-height 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.35s ease,
+              margin-top 0.35s ease;
+}
+
+.detailed-expansion-container.collapsed {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  margin-top: 0 !important;
+  pointer-events: none !important;
+}
+
+.detailed-expansion-container.expanded {
+  max-height: 480px;
+  opacity: 1;
+  margin-top: 8px;
+  pointer-events: auto;
+}
+
+.detailed-expansion-inner {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px 14px;
+  animation: slide-unfold 0.38s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slide-unfold {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Spoken voice summary pill inside turn (legacy/chat fallback) */
 .chat-spoken-pill {
   display: inline-flex;
   align-items: center;

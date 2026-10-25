@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pointy AI</title>
+  <link rel="stylesheet" href="chat-app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+  <div class="app-layout">
+    <!-- Left Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <!-- Sidebar Header -->
+      <div class="sidebar-header">
+        <div class="brand">
+          <svg class="pointy-brand-icon" viewBox="0 0 512 512" width="22" height="22">
+            <path d="M 71,1 L 461,328 L 209,313 L 49,510 Z" fill="#e21b1b" />
+          </svg>
+          <span class="brand-title">Pointy AI</span>
+        </div>
+        <div class="header-actions">
+          <button id="btn-search-chats" class="icon-btn" title="Search conversations">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </button>
+          <button id="btn-toggle-sidebar" class="icon-btn" title="Close sidebar">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- New Chat Button -->
+      <div class="sidebar-new-chat-wrap">
+        <button id="btn-new-chat" class="new-chat-btn">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          <span>New chat</span>
+        </button>
+      </div>
+
+      <!-- Search Filter (Hidden by default, toggled via search icon) -->
+      <div id="search-filter-box" class="search-filter-box hidden">
+        <input type="text" id="chat-search-input" placeholder="Search chats..." autocomplete="off">
+        <button id="btn-clear-search" class="clear-btn">✕</button>
+      </div>
+
+      <!-- Conversation Lists Scrollable Area -->
+      <div class="sidebar-scrollable-content">
+        <!-- Pinned Chats Section -->
+        <div class="chats-section">
+          <div class="section-label">Pinned</div>
+          <div id="pinned-chats-list" class="conversations-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Recents Chats Section -->
+        <div class="chats-section">
+          <div class="section-label">Recents</div>
+          <div id="recents-chats-list" class="conversations-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+
+      <!-- User Profile & Settings Footer -->
+      <div class="sidebar-footer">
+        <div class="user-profile">
+          <div class="user-avatar">SS</div>
+          <div class="user-details">
+            <span class="user-name">Srirama Subhash</span>
+            <span class="plan-badge">Pointy Pro</span>
+          </div>
+        </div>
+        <button id="btn-open-settings" class="settings-btn" title="Settings & API Keys">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Chat Workspace -->
+    <main class="main-content">
+      <!-- Top Bar -->
+      <header class="main-topbar">
+        <div class="topbar-left">
+          <button id="btn-sidebar-collapse-toggle" class="icon-btn hidden" title="Open sidebar">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+          </button>
+          <div class="model-dropdown-wrap">
+            <button id="btn-model-selector" class="model-selector-btn">
+              <span class="model-status-indicator"></span>
+              <span id="current-model-name">Gemini 3.5 Flash-Lite</span>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div id="model-dropdown-menu" class="model-menu hidden">
+              <div class="menu-item active" data-model="gemini-3.5-flash-lite" data-label="Gemini 3.5 Flash-Lite">
+                <div class="menu-item-title">Gemini 3.5 Flash-Lite (Recommended)</div>
+                <div class="menu-item-desc">Ultra-fast multimodal reasoning, sub-second latency & desktop vision</div>
+              </div>
+              <div class="menu-item" data-model="gemini-3.5-flash" data-label="Gemini 3.5 Flash">
+                <div class="menu-item-title">Gemini 3.5 Flash</div>
+                <div class="menu-item-desc">Deep multimodal reasoning, complex UI reasoning & coding</div>
+              </div>
+              <div class="menu-item" data-model="gemini-3.8-flash" data-label="Gemini 3.8 Flash">
+                <div class="menu-item-title">Gemini 3.8 Flash</div>
+                <div class="menu-item-desc">Next-generation high capability model for advanced workflows</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="topbar-right">
+          <!-- Pointy Spatial Companion Toggle -->
+          <button id="btn-toggle-pointy" class="pointy-companion-pill" title="Toggle Pointy Spatial Desktop Pointer">
+            <svg viewBox="0 0 512 512" width="15" height="15" class="pointy-cursor-icon">
+              <path d="M 71,1 L 461,328 L 209,313 L 49,510 Z" fill="#e21b1b" />
+            </svg>
+            <span id="pointy-status-text">Pointy: Active</span>
+          </button>
+
+          <button id="btn-header-settings" class="icon-btn" title="Settings & API Keys">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Chat Stream / Conversation Body -->
+      <div id="chat-scroll-container" class="chat-scroll-container">
+        <!-- Empty State (Matches User's Screenshot Exactly) -->
+        <div id="empty-state-view" class="empty-state-view">
+          <div class="empty-greeting-container">
+            <h1 class="empty-greeting">Good to see you, Srirama.</h1>
+
+            <!-- Centered Floating Pill Input (When Chat is Empty) -->
+            <div class="empty-input-wrapper">
+              <div class="chat-pill-input">
+                <button id="empty-attach-btn" class="pill-btn attach-btn" title="Attach file or active screen">
+                  <span class="icon-plus">+</span>
+                </button>
+                <input type="text" id="empty-main-input" class="pill-text-input" placeholder="Ask anything" autocomplete="off" />
+                
+                <div class="pill-right-tools">
+                  <button id="empty-think-btn" class="pill-tool-btn think-btn" title="Toggle Thinking Reasoning">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                    <span>Think</span>
+                  </button>
+                  <button id="empty-mic-btn" class="pill-tool-btn mic-btn" title="Voice Input (Speech-to-Text)">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+                  </button>
+                  <button id="empty-send-btn" class="pill-circle-btn blue-btn" title="Send or Start Voice">
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Quick suggestion starter chips -->
+              <div class="prompt-chips">
+                <button class="chip-btn" data-prompt="Analyze my screen and explain what's visible right now.">
+                  🖥️ Analyze active screen
+                </button>
+                <button class="chip-btn" data-prompt="Write a clean Python script for automated web scraping with error handling.">
+                  🐍 Write clean Python script
+                </button>
+                <button class="chip-btn" data-prompt="Give me 5 viral YouTube video concepts for tech tutorials.">
+                  💡 Viral video concepts
+                </button>
+                <button class="chip-btn" data-prompt="Explain how LLM vector embeddings work step by step.">
+                  🧠 Explain vector embeddings
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Active Conversation Thread -->
+        <div id="messages-thread" class="messages-thread hidden">
+          <!-- Dynamically populated turns -->
+        </div>
+      </div>
+
+      <!-- Bottom Floating Sticky Input Bar (Visible in Active Chat) -->
+      <div id="bottom-bar" class="bottom-input-container hidden">
+        <div class="chat-pill-input main-bottom-pill">
+          <button id="bottom-attach-btn" class="pill-btn attach-btn" title="Attach active screen vision">
+            <span class="icon-plus">+</span>
+          </button>
+          
+          <textarea id="main-textarea" class="pill-textarea" placeholder="Ask anything..." rows="1"></textarea>
+
+          <div class="pill-right-tools">
+            <button id="bottom-think-btn" class="pill-tool-btn think-btn" title="Toggle Thinking Reasoning">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              <span>Think</span>
+            </button>
+            <button id="bottom-mic-btn" class="pill-tool-btn mic-btn" title="Voice Input">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+            </button>
+            <button id="main-send-btn" class="pill-circle-btn blue-btn" title="Send (Enter)">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="bottom-disclaimer">Pointy AI can make mistakes. Verify important information.</div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Settings & API Keys Modal Dialog -->
+  <div id="settings-modal" class="modal-backdrop hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-icon">⚙️</span>
+          <h2>Pointy AI Settings</h2>
+        </div>
+        <button id="btn-close-settings" class="modal-close-btn">✕</button>
+      </div>
+
+      <div class="modal-tabs">
+        <button class="tab-btn active" data-tab="tab-api-keys">🔑 API Keys & Model</button>
+        <button class="tab-btn" data-tab="tab-general">👤 Personalization</button>
+        <button class="tab-btn" data-tab="tab-data">💾 Data & Storage</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Tab 1: API Keys & Reasoning Model -->
+        <div id="tab-api-keys" class="tab-content active">
+          <p class="tab-subtitle">Configure your reasoning model and API keys. Changes update immediately and persist locally.</p>
+
+          <!-- Gemini API Key -->
+          <div class="setting-item">
+            <div class="setting-label-row">
+              <label for="input-gemini-key">Google Gemini API Key</label>
+              <span id="gemini-status-badge" class="status-badge checking">Checking...</span>
+            </div>
+            <div class="input-with-actions">
+              <input type="password" id="input-gemini-key" placeholder="Enter your Gemini API key (AQ... or AIza...)" autocomplete="off" />
+              <button class="toggle-visibility-btn" data-target="input-gemini-key" title="Show / Hide">👁️</button>
+            </div>
+            <div class="setting-help-row">
+              <span class="help-text">Powers reasoning, vision & multi-turn chat. Free key at <a href="#" id="link-gemini-studio">Google AI Studio</a>.</span>
+              <button id="btn-test-gemini" class="secondary-btn">Test Connection</button>
+            </div>
+            <div id="gemini-test-result" class="test-result-msg hidden"></div>
+          </div>
+
+          <!-- Active Reasoning Model -->
+          <div class="setting-item">
+            <div class="setting-label-row">
+              <label for="select-reasoning-model">Active Reasoning Model</label>
+              <span class="status-badge configured" id="model-badge-preview">Selected</span>
+            </div>
+            <select id="select-reasoning-model" class="setting-select">
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast Multimodal Reasoning)</option>
+              <option value="gemini-2.0-flash-thinking-exp-01-21">Gemini 2.0 Flash Thinking (Deep Step-by-Step Reasoning)</option>
+              <option value="gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Advanced Math, Logic & Code Analysis)</option>
+              <option value="gemini-1.5-pro">Gemini 1.5 Pro (Ultra-deep 2M Token Context Reasoning)</option>
+            </select>
+            <span class="help-text">This reasoning model powers all your conversations, code generation, and screen guides.</span>
+          </div>
+
+          <!-- Google Cloud TTS Key -->
+          <div class="setting-item">
+            <div class="setting-label-row">
+              <label for="input-tts-key">Google Cloud TTS API Key (Voice Output)</label>
+              <span class="status-badge optional">Optional</span>
+            </div>
+            <div class="input-with-actions">
+              <input type="password" id="input-tts-key" placeholder="Enter Google Cloud TTS key" autocomplete="off" />
+              <button class="toggle-visibility-btn" data-target="input-tts-key" title="Show / Hide">👁️</button>
+            </div>
+            <span class="help-text">High-fidelity voice read aloud. Defaults to Gemini key if empty.</span>
+          </div>
+
+          <!-- AssemblyAI Key -->
+          <div class="setting-item">
+            <div class="setting-label-row">
+              <label for="input-assembly-key">AssemblyAI API Key (Speech-to-Text)</label>
+              <span class="status-badge optional">Optional</span>
+            </div>
+            <div class="input-with-actions">
+              <input type="password" id="input-assembly-key" placeholder="Enter AssemblyAI API key" autocomplete="off" />
+              <button class="toggle-visibility-btn" data-target="input-assembly-key" title="Show / Hide">👁️</button>
+            </div>
+            <span class="help-text">High-accuracy live voice transcription. Web Speech fallback active.</span>
+          </div>
+        </div>
+
+        <!-- Tab 2: Personalization -->
+        <div id="tab-general" class="tab-content">
+          <div class="setting-item">
+            <label for="input-user-name">Your Name</label>
+            <input type="text" id="input-user-name" value="Srirama Subhash" placeholder="Enter your name" />
+            <span class="help-text">Displayed on the home screen greeting and profile.</span>
+          </div>
+
+          <div class="setting-item">
+            <label for="select-default-model">Reasoning Model</label>
+            <select id="select-default-model" class="setting-select">
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast Multimodal Reasoning)</option>
+              <option value="gemini-2.0-flash-thinking-exp-01-21">Gemini 2.0 Flash Thinking (Deep Step-by-Step Reasoning)</option>
+              <option value="gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Advanced Math, Logic & Code Analysis)</option>
+              <option value="gemini-1.5-pro">Gemini 1.5 Pro (Ultra-deep 2M Token Context Reasoning)</option>
+            </select>
+          </div>
+
+          <div class="setting-item toggle-setting">
+            <div>
+              <div class="toggle-label">Spatial Red Cursor Companion</div>
+              <div class="help-text">Enables Pointy to fly and pinpoint elements directly on your Windows desktop.</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="toggle-pointy-companion" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Tab 3: Data & Storage -->
+        <div id="tab-data" class="tab-content">
+          <div class="data-stats-card">
+            <div class="data-stat-item">
+              <span class="stat-number" id="stats-chat-count">0</span>
+              <span class="stat-label">Stored Conversations</span>
+            </div>
+            <div class="data-stat-item">
+              <span class="stat-number" id="stats-msg-count">0</span>
+              <span class="stat-label">Total Messages</span>
+            </div>
+          </div>
+
+          <div class="setting-item">
+            <div class="data-actions-row">
+              <button id="btn-export-chats" class="secondary-btn">📥 Export Chats (JSON)</button>
+              <button id="btn-clear-all-chats" class="danger-btn">🗑️ Delete All Chats</button>
+            </div>
+            <span class="help-text">All conversation history is stored locally in <code>pointy_conversations.json</code>.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <span id="settings-save-status" class="save-status-msg"></span>
+        <div class="footer-buttons">
+          <button id="btn-cancel-settings" class="secondary-btn">Cancel</button>
+          <button id="btn-save-settings" class="primary-btn">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="chat-app.js"></script>
+</body>
+</html>

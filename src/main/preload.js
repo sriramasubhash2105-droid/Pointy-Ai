@@ -46,3 +46,34 @@ contextBridge.exposeInMainWorld('pointyAPI', {
   switchConversation: (id) => ipcRenderer.invoke('switch-conversation', id),
   onConversationUpdated: (callback) => ipcRenderer.on('conversation-updated', (_, data) => callback(data)),
 });
+
+// Full ChatGPT Desktop Application API
+contextBridge.exposeInMainWorld('chatAPI', {
+  getConversations: () => ipcRenderer.invoke('chat-get-conversations'),
+  getConversation: (id) => ipcRenderer.invoke('chat-get-conversation', id),
+  createConversation: (title) => ipcRenderer.invoke('chat-create-conversation', title),
+  switchConversation: (id) => ipcRenderer.invoke('chat-switch-conversation', id),
+  deleteConversation: (id) => ipcRenderer.invoke('chat-delete-conversation', id),
+  renameConversation: (id, title) => ipcRenderer.invoke('chat-rename-conversation', id, title),
+  clearAllConversations: () => ipcRenderer.invoke('chat-clear-all-conversations'),
+  sendMessage: (convIdOrPayload, text, options) => {
+    if (typeof convIdOrPayload === 'object') {
+      return ipcRenderer.invoke('chat-send-message', convIdOrPayload);
+    }
+    return ipcRenderer.invoke('chat-send-message', {
+      convId: convIdOrPayload,
+      text,
+      model: options?.model,
+      attachScreen: options?.attachScreen || options?.screenshot,
+    });
+  },
+  getApiKeys: () => ipcRenderer.invoke('chat-get-api-keys'),
+  saveApiKeys: (keys) => ipcRenderer.invoke('chat-save-api-keys', keys),
+  testGeminiKey: (apiKey) => ipcRenderer.invoke('chat-test-gemini-key', apiKey),
+  speakText: (text) => ipcRenderer.invoke('chat-speak-text', text),
+  takeScreenshot: () => ipcRenderer.invoke('take-screenshot'),
+  toggleOverlay: () => ipcRenderer.invoke('chat-toggle-overlay'),
+  isOverlayActive: () => ipcRenderer.invoke('chat-is-overlay-active'),
+  onConversationUpdated: (callback) => ipcRenderer.on('conversation-updated', (_, data) => callback(data)),
+  onApiKeysUpdated: (callback) => ipcRenderer.on('api-keys-updated', (_, data) => callback(data)),
+});

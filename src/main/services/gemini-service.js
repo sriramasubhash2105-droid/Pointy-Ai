@@ -144,7 +144,6 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
       contents.push({
         role: 'user',
         parts: [
-          { text: systemPrompt },
           {
             inlineData: {
               mimeType: 'image/jpeg',
@@ -160,8 +159,9 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
       const requestPayload = {
         contents,
         config: {
-          temperature: 0.15,
-          maxOutputTokens: 2048,
+          systemInstruction: systemPrompt,
+          temperature: 0.1,
+          maxOutputTokens: 1024,
           responseMimeType: 'application/json',
         },
       };
@@ -326,6 +326,54 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
     }
 
     return normalized;
+  }
+
+  /**
+   * Direct multi-turn conversational chat completion (ChatGPT style)
+   */
+  async generateChatResponse(prompt, history = [], options = {}) {
+    if (!this.ai) {
+      throw new Error('Gemini API key not configured. Set GEMINI_API_KEY in Settings.');
+    }
+
+    const modelName = options.model || 'gemini-2.5-flash';
+    const systemInstruction = options.systemInstruction || 'You are an advanced AI assistant built like ChatGPT. Answer questions thoroughly with clean markdown, clear headings, bullet points, and syntax-highlighted code blocks where applicable.';
+
+    const contents = [];
+    for (const h of history) {
+      contents.push({
+        role: h.role === 'user' ? 'user' : 'model',
+        parts: Array.isArray(h.parts) ? h.parts : [{ text: h.text || '' }]
+      });
+    }
+
+    contents.push({
+      role: 'user',
+      parts: [{ text: prompt }]
+    });
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: modelName,
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        }
+      });
+      return response.text || 'I could not generate a response. Please try again.';
+    } catch (err) {
+      console.warn(`[GeminiService] Model ${modelName} error, trying fallback...`, err.message);
+      try {
+        const fallbackResp = await this.ai.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents,
+        });
+        return fallbackResp.text || '';
+      } catch (e2) {
+        throw new Error(err.message || 'Gemini error');
+      }
+    }
   }
 }
 

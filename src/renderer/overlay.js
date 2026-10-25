@@ -742,30 +742,486 @@ function escapeHtml(str) {
 
 // ─── Single Answer & Multi-Turn Chat Engine ───────────────────────────
 
+let activeStreamingTimer = null;
+
 /**
- * Creates an assistant turn DOM node for any answer result
+ * Creates an assistant turn DOM node:
+ * - Shows ONLY what Pointy speaks initially with real-time text expansion
+ * - Provides a "View Full Details" toggle to reveal full markdown, code, and steps
  */
-function createAssistantTurnElement(result) {
+function createAssistantTurnElement(result, shouldStream = false) {
   const astDiv = document.createElement('div');
   astDiv.className = 'chat-turn assistant';
 
-  let inner = '';
-  const spoken = result.reply || '';
-  const detailed = result.detailed_explanation || spoken;
-  if (spoken && detailed && spoken !== detailed && spoken.length < detailed.length) {
-    inner += `<div class="chat-spoken-pill"><span>🔊</span><span>${escapeHtml(spoken)}</span></div>`;
-  }
+  const spoken = (result.reply || (result.detailed_explanation ? result.detailed_explanation.split('\n')[0] : '')).trim();
+  const detailed = (result.detailed_explanation || spoken).trim();
+  const hasExtraDetails = !!(
+    detailed &&
+    ((detailed !== spoken && detailed.length > spoken.length + 5) ||
+     detailed.includes('```') ||
+     detailed.includes('###') ||
+     detailed.includes('- ') ||
+     detailed.includes('\n') ||
+     (result.steps && result.steps.length > 0))
+  );
 
-  inner += `<div class="chat-msg-text">${renderMarkdownToHtml(detailed)}</div>`;
+  let inner = `
+    <div class="spoken-speech-wrapper">
+      <div class="spoken-speech-header">
+        <span class="speech-avatar-dot"></span>
+        <span class="speech-tag">Pointy Spoken</span>
+      </div>
+      <div class="spoken-speech-bubble">
+        <span class="spoken-text-content">${escapeHtml(spoken)}</span>
+        <span class="speech-typing-cursor hidden"></span>
+      </div>
+    </div>
+  `;
 
-  if (result.steps && result.steps.length > 0) {
+  if (hasExtraDetails) {
+    inner += `
+      <div class="details-toggle-wrapper">
+        <button class="btn-toggle-details" type="button" title="Click to view full explanation, code, and details">
+          <span class="toggle-icon">✨</span>
+          <span class="toggle-text">View Full Details</span>
+          <span class="toggle-arrow">▾</span>
+        </button>
+      </div>
+
+      <div class="detailed-expansion-container collapsed">
+        <div class="detailed-expansion-inner">
+          <div class="chat-msg-text">${renderMarkdownToHtml(detailed)}</div>
+  `;
+
+    if (result.steps && result.steps.length > 0) {
+      const step = result.steps[0];
+      const label = step.label || step.instruction || 'Target Location';
+      inner += `<div class="chat-target-badge" title="Point at this target again"><span>📍</span><span>Pointed to: ${escapeHtml(label)}</span></div>`;
+    }
+
+    inner += `
+        </div>
+      </div>
+    `;
+  } else if (result.steps && result.steps.length > 0) {
     const step = result.steps[0];
     const label = step.label || step.instruction || 'Target Location';
     inner += `<div class="chat-target-badge" title="Point at this target again"><span>📍</span><span>Pointed to: ${escapeHtml(label)}</span></div>`;
   }
 
   astDiv.innerHTML = inner;
+
+  // Setup streaming animation if requested
+  const textSpan = astDiv.querySelector('.spoken-text-content');
+  const cursorSpan = astDiv.querySelector('.speech-typing-cursor');
+
+  if (shouldStream && spoken && textSpan) {
+    streamSpokenText(spoken, textSpan, cursorSpan, astDiv);
+  }
+
+  // Setup View Full Details toggle
+  const toggleBtn = astDiv.querySelector('.btn-toggle-details');
+  const detailsContainer = astDiv.querySelector('.detailed-expansion-container');
+
+  if (toggleBtn && detailsContainer) {
+    toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (answerDismissTimer) {
+        clearTimeout(answerDismissTimer);
+        answerDismissTimer = null;
+      }
+
+      const isCurrentlyCollapsed = detailsContainer.classList.contains('collapsed');
+      if (isCurrentlyCollapsed) {
+        detailsContainer.classList.remove('collapsed');
+        detailsContainer.classList.add('expanded');
+        toggleBtn.classList.add('expanded');
+        toggleBtn.classList.remove('ready-pulse');
+        toggleBtn.querySelector('.toggle-text').textContent = 'Hide Details';
+        toggleBtn.querySelector('.toggle-arrow').textContent = '▴';
+        cursorAnswerCard.classList.add('details-open');
+        applyCardSizing(detailed, isChatModeActive, true);
+      } else {
+        detailsContainer.classList.add('collapsed');
+        detailsContainer.classList.remove('expanded');
+        toggleBtn.classList.remove('expanded');
+        toggleBtn.querySelector('.toggle-text').textContent = 'View Full Details';
+        toggleBtn.querySelector('.toggle-arrow').textContent = '▾';
+        cursorAnswerCard.classList.remove('details-open');
+        applyCardSizing(spoken, isChatModeActive, false);
+      }
+      setTimeout(() => repositionAnswerCard(), 60);
+    });
+  }
+
   return astDiv;
+}
+
+let activeTypingTimer = null;
+
+function positionBubbleAtCursor(cursorX, cursorY) {
+  const wrapper = document.getElementById('cursor-answer-card');
+  const bubble = document.getElementById('speech-bubble');
+  if (!wrapper) return;
+
+  const x = (typeof cursorX === 'number') ? cursorX : (currentCursorPos ? currentCursorPos.x : window.innerWidth / 2);
+  const y = (typeof cursorY === 'number') ? cursorY : (currentCursorPos ? currentCursorPos.y : window.innerHeight / 2);
+
+  const screenW = window.innerWidth;
+  const screenH = window.innerHeight;
+  const bubbleH = bubble && bubble.offsetHeight ? bubble.offsetHeight : 44;
+
+  // Decide horizontal orientation based on screen room
+  const shouldFlipLeft = (x > screenW - 320) || (x + 280 > screenW - 20);
+
+  if (shouldFlipLeft) {
+    wrapper.classList.add('flipped-left');
+    // Pin right edge 16px to the left of Pointy
+    const rightPos = Math.max(16, (screenW - x) + 16);
+    wrapper.style.right = `${Math.round(rightPos)}px`;
+    wrapper.style.left = 'auto';
+  } else {
+    wrapper.classList.remove('flipped-left');
+    // Pin left edge 28px to the right of Pointy
+    const leftPos = Math.max(16, x + 28);
+    wrapper.style.left = `${Math.round(leftPos)}px`;
+    wrapper.style.right = 'auto';
+  }
+
+  // Vertical positioning: align bubble top slightly elevated relative to Pointy tip
+  let topPos = y - 12;
+  if (topPos + bubbleH > screenH - 20) {
+    topPos = Math.max(16, screenH - bubbleH - 20);
+  }
+  if (topPos < 16) {
+    topPos = 16;
+  }
+
+  wrapper.style.top = `${Math.round(topPos)}px`;
+  wrapper.style.transform = 'none';
+}
+
+function setupBubbleDetailsToggle() {
+  const toggleBtn = document.getElementById('bubble-details-toggle');
+  const detailsBody = document.getElementById('bubble-details-body');
+  if (!toggleBtn || !detailsBody) return;
+
+  toggleBtn.onclick = (e) => {
+    e.stopPropagation();
+    if (answerDismissTimer) {
+      clearTimeout(answerDismissTimer);
+      answerDismissTimer = null;
+    }
+    const isCollapsed = detailsBody.classList.contains('collapsed');
+    if (isCollapsed) {
+      detailsBody.classList.remove('collapsed');
+      toggleBtn.textContent = 'hide details ▴';
+    } else {
+      detailsBody.classList.add('collapsed');
+      toggleBtn.textContent = 'view full details ▾';
+    }
+    setTimeout(() => positionBubbleAtCursor(), 40);
+  };
+}
+
+function setupBubbleChatActions() {
+  const actions = document.getElementById('bubble-actions');
+  const btnContinue = document.getElementById('bubble-btn-continue');
+  const btnNew = document.getElementById('bubble-btn-new');
+  const replyBar = document.getElementById('bubble-reply-bar');
+  const replyInput = document.getElementById('bubble-reply-input');
+  const replyMic = document.getElementById('bubble-reply-mic');
+  const replySend = document.getElementById('bubble-reply-send');
+
+  if (!btnContinue || !btnNew || !replyBar || !replyInput) return;
+
+  btnContinue.onclick = (e) => {
+    e.stopPropagation();
+    if (answerDismissTimer) {
+      clearTimeout(answerDismissTimer);
+      answerDismissTimer = null;
+    }
+    btnContinue.classList.add('active');
+    btnNew.classList.remove('active');
+
+    replyBar.classList.remove('hidden');
+    replyInput.placeholder = 'Ask a follow-up...';
+    window.pointyAPI.setIgnoreMouseEvents(false);
+    setTimeout(() => {
+      replyInput.focus();
+      positionBubbleAtCursor();
+    }, 40);
+  };
+
+  btnNew.onclick = async (e) => {
+    e.stopPropagation();
+    if (answerDismissTimer) {
+      clearTimeout(answerDismissTimer);
+      answerDismissTimer = null;
+    }
+    btnNew.classList.add('active');
+    btnContinue.classList.remove('active');
+
+    try {
+      if (window.pointyAPI.startNewChat) {
+        activeConversation = await window.pointyAPI.startNewChat();
+      }
+    } catch (err) {
+      console.warn('[Overlay] startNewChat error:', err);
+    }
+    lastAnswerTurn = null;
+    isChatModeActive = false;
+
+    replyBar.classList.remove('hidden');
+    replyInput.placeholder = '✨ Start a new conversation...';
+    window.pointyAPI.setIgnoreMouseEvents(false);
+    setTimeout(() => {
+      replyInput.focus();
+      positionBubbleAtCursor();
+    }, 40);
+  };
+
+  const submitBubbleReply = () => {
+    const question = replyInput.value.trim();
+    if (!question) return;
+
+    if (answerDismissTimer) {
+      clearTimeout(answerDismissTimer);
+      answerDismissTimer = null;
+    }
+
+    replyInput.value = '';
+    replyBar.classList.add('hidden');
+    actions?.classList.add('hidden');
+
+    setAppState('thinking');
+    window.pointyAPI.sendTypedQuestion(question);
+  };
+
+  if (replySend) {
+    replySend.onclick = (e) => {
+      e.stopPropagation();
+      submitBubbleReply();
+    };
+  }
+
+  replyInput.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitBubbleReply();
+    } else if (e.key === 'Escape') {
+      replyBar.classList.add('hidden');
+      btnContinue.classList.remove('active');
+      btnNew.classList.remove('active');
+      positionBubbleAtCursor();
+    }
+  };
+
+  replyInput.onfocus = () => {
+    if (answerDismissTimer) {
+      clearTimeout(answerDismissTimer);
+      answerDismissTimer = null;
+    }
+  };
+
+  if (replyMic) {
+    replyMic.onclick = (e) => {
+      e.stopPropagation();
+      if (answerDismissTimer) {
+        clearTimeout(answerDismissTimer);
+        answerDismissTimer = null;
+      }
+      handleFollowUpMicClick();
+    };
+  }
+}
+
+/**
+ * Renders the minimalist Pointy-red outgoing chat speech bubble:
+ * Anchored directly beside where the Pointy cursor goes or points to!
+ * Starts with a tiny pill-like bubble containing just the first character,
+ * and progressively reveals text character-by-character while expanding smoothly
+ * in width and height, complete with seamless bottom-right tail, muted blue border,
+ * vibrant red gradient, and blinking white cursor.
+ */
+function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = false, showChatActions = false) {
+  if (activeTypingTimer) {
+    clearInterval(activeTypingTimer);
+    activeTypingTimer = null;
+  }
+  if (answerDismissTimer) {
+    clearTimeout(answerDismissTimer);
+    answerDismissTimer = null;
+  }
+
+  const bubbleText = document.getElementById('bubble-text');
+  const bubbleCursor = document.getElementById('bubble-cursor');
+  const detailsContainer = document.getElementById('bubble-details-container');
+  const detailsBody = document.getElementById('bubble-details-body');
+  const detailsToggle = document.getElementById('bubble-details-toggle');
+  const bubbleActions = document.getElementById('bubble-actions');
+  const bubbleReplyBar = document.getElementById('bubble-reply-bar');
+  const bubbleReplyInput = document.getElementById('bubble-reply-input');
+  const speechBubble = document.getElementById('speech-bubble');
+
+  if (!bubbleText || !cursorAnswerCard) return;
+
+  // Reveal speech bubble container anchored to Pointy's position!
+  positionBubbleAtCursor();
+  cursorAnswerCard.classList.remove('hidden');
+
+  // Reset details view and actions
+  if (detailsContainer) {
+    detailsContainer.classList.add('hidden');
+  }
+  if (detailsBody) {
+    detailsBody.classList.add('collapsed');
+    detailsBody.innerHTML = '';
+  }
+  if (detailsToggle) {
+    detailsToggle.textContent = 'view full details ▾';
+  }
+  if (bubbleActions) {
+    bubbleActions.classList.add('hidden');
+  }
+  if (bubbleReplyBar) {
+    bubbleReplyBar.classList.add('hidden');
+  }
+  if (bubbleReplyInput) {
+    bubbleReplyInput.value = '';
+  }
+
+  const text = (fullText || '').trim();
+  if (!text) return;
+
+  // Start with tiny speech bubble containing just the first character
+  let charIdx = 1;
+  bubbleText.textContent = text.slice(0, 1);
+  if (bubbleCursor) bubbleCursor.classList.remove('hidden');
+  positionBubbleAtCursor();
+
+  // Character typing cadence: ~26ms per character for continuous, natural typing
+  const charDelay = 26;
+
+  activeTypingTimer = setInterval(() => {
+    if (charIdx < text.length) {
+      charIdx++;
+      bubbleText.textContent = text.slice(0, charIdx);
+      if (charIdx % 4 === 0 || charIdx === text.length) {
+        positionBubbleAtCursor();
+      }
+    } else {
+      clearInterval(activeTypingTimer);
+      activeTypingTimer = null;
+      if (bubbleCursor) bubbleCursor.classList.add('hidden');
+      positionBubbleAtCursor();
+
+      // Finished typing: reveal minimalist "view full details" if extra info exists
+      if (hasExtra && detailedExplanation && detailsContainer && detailsBody) {
+        detailsBody.innerHTML = renderMarkdownToHtml(detailedExplanation);
+        detailsContainer.classList.remove('hidden');
+        setupBubbleDetailsToggle();
+      }
+
+      // Reveal chat actions only if allowed (never for pointing queries)
+      if (showChatActions && bubbleActions) {
+        bubbleActions.classList.remove('hidden');
+        setupBubbleChatActions();
+      } else if (bubbleActions) {
+        bubbleActions.classList.add('hidden');
+      }
+      positionBubbleAtCursor();
+
+      // Briefly hold the finished bubble on screen (8.5 seconds)
+      if (answerDismissTimer) clearTimeout(answerDismissTimer);
+      answerDismissTimer = setTimeout(() => {
+        resetToStandby();
+      }, 8500);
+    }
+  }, charDelay);
+
+  // If user clicks anywhere on speech bubble while typing, complete instantly
+  const finishInstantly = () => {
+    if (activeTypingTimer) {
+      clearInterval(activeTypingTimer);
+      activeTypingTimer = null;
+      if (bubbleCursor) bubbleCursor.classList.add('hidden');
+      bubbleText.textContent = text;
+      positionBubbleAtCursor();
+
+      if (hasExtra && detailedExplanation && detailsContainer && detailsBody) {
+        detailsBody.innerHTML = renderMarkdownToHtml(detailedExplanation);
+        detailsContainer.classList.remove('hidden');
+        setupBubbleDetailsToggle();
+      }
+
+      if (showChatActions && bubbleActions) {
+        bubbleActions.classList.remove('hidden');
+        setupBubbleChatActions();
+      } else if (bubbleActions) {
+        bubbleActions.classList.add('hidden');
+      }
+      positionBubbleAtCursor();
+
+      if (answerDismissTimer) clearTimeout(answerDismissTimer);
+      answerDismissTimer = setTimeout(() => {
+        resetToStandby();
+      }, 8500);
+    }
+  };
+
+  if (speechBubble) {
+    speechBubble.onclick = (e) => {
+      if (e.target && e.target.closest('#bubble-details-toggle, #bubble-actions, #bubble-reply-bar')) return;
+      finishInstantly();
+    };
+  }
+}
+
+/**
+ * Streams the spoken text (chat-mode turn fallback)
+ */
+function streamSpokenText(fullText, textElement, cursorElement, astDiv) {
+  if (activeStreamingTimer) {
+    clearInterval(activeStreamingTimer);
+    activeStreamingTimer = null;
+  }
+
+  const words = fullText.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return;
+
+  textElement.textContent = '';
+  cursorElement?.classList.remove('hidden');
+
+  let currentWordIdx = 0;
+  const delay = 100;
+
+  activeStreamingTimer = setInterval(() => {
+    if (currentWordIdx < words.length) {
+      const word = words[currentWordIdx];
+      const wordSpan = document.createElement('span');
+      wordSpan.className = 'stream-word';
+      wordSpan.textContent = (currentWordIdx === 0 ? '' : ' ') + word;
+      textElement.appendChild(wordSpan);
+      currentWordIdx++;
+    } else {
+      clearInterval(activeStreamingTimer);
+      activeStreamingTimer = null;
+      cursorElement?.classList.add('hidden');
+    }
+  }, delay);
+
+  const finishImmediately = () => {
+    if (activeStreamingTimer) {
+      clearInterval(activeStreamingTimer);
+      activeStreamingTimer = null;
+      textElement.textContent = fullText;
+      cursorElement?.classList.add('hidden');
+    }
+  };
+
+  astDiv.addEventListener('click', finishImmediately, { once: true });
 }
 
 /**
@@ -799,11 +1255,10 @@ function attachStreamListeners() {
 /**
  * Applies dynamic sizing tiers according to the answer's demand:
  * - size-compact: short 1-line or 2-line answers (~310px width)
- * - size-medium: 2-4 sentences or short lists (~410px width)
- * - size-expanded: long explanations, code blocks, or multi-turn chat (~520px width)
- * Respects user manual resizing if dragged.
+ * - size-medium: 2-4 sentences (~410px width)
+ * - size-expanded: full details, code blocks, or expanded mode (~520px width)
  */
-function applyCardSizing(content = '', isChat = false) {
+function applyCardSizing(content = '', isChat = false, isExpanded = false) {
   if (userHasManuallyResized && manualCardWidth && manualCardHeight) {
     cursorAnswerCard.classList.add('manually-resized');
     cursorAnswerCard.style.width = `${manualCardWidth}px`;
@@ -815,20 +1270,16 @@ function applyCardSizing(content = '', isChat = false) {
   cursorAnswerCard.style.width = '';
   cursorAnswerCard.style.height = '';
 
-  if (isChat) {
-    cursorAnswerCard.classList.add('chat-mode', 'size-expanded');
+  if (isChat || isExpanded) {
+    cursorAnswerCard.classList.add('size-expanded');
+    if (isChat) cursorAnswerCard.classList.add('chat-mode');
     return;
   }
 
   const text = content || '';
   const textLength = text.length;
-  const hasCode = text.includes('```') || text.includes('`') || text.includes('<pre');
-  const hasList = text.includes('<li>') || text.includes('\n- ') || text.includes('\n1. ');
-  const hasHeading = text.includes('<h') || text.includes('#');
 
-  if (hasCode || (hasHeading && hasList) || textLength > 300) {
-    cursorAnswerCard.classList.add('size-expanded');
-  } else if (textLength > 110 || hasList || hasHeading) {
+  if (textLength > 120) {
     cursorAnswerCard.classList.add('size-medium');
   } else {
     cursorAnswerCard.classList.add('size-compact');
@@ -886,28 +1337,31 @@ function setupCardResize() {
 }
 
 /**
- * Renders ONLY the answer the user asked for (Single Answer Mode).
- * Storing conversation in memory, but showing only the direct answer in the floating card.
+ * Renders the minimalist light-red outgoing chat speech bubble:
+ * Starts with a tiny pill-like bubble containing just the first character,
+ * and progressively reveals text character-by-character while expanding smoothly
+ * in width and height, complete with seamless bottom-right tail, muted blue border,
+ * subtle red gradient, and blinking cursor.
  */
 function renderSingleAnswer(result, question) {
-  if (!chatStream) return;
   removeThinkingTurn();
 
-  chatStream.innerHTML = '';
-  const astDiv = createAssistantTurnElement(result);
-  chatStream.appendChild(astDiv);
-  attachStreamListeners();
+  // When pointing things out, do NOT show continue chat or new chat — just show the text!
+  const isPointing = (result.mode === 'pointer') || (Array.isArray(result.steps) && result.steps.length > 0);
 
-  const answerText = result.detailed_explanation || result.reply || '';
-  applyCardSizing(answerText, false);
+  const spoken = (result.reply || (result.detailed_explanation ? result.detailed_explanation.split('\n')[0] : '')).trim();
+  const detailed = (result.detailed_explanation || spoken).trim();
+  const hasExtra = !isPointing && !!(
+    detailed &&
+    ((detailed !== spoken && detailed.length > spoken.length + 5) ||
+     detailed.includes('```') ||
+     detailed.includes('###') ||
+     detailed.includes('- ') ||
+     detailed.includes('\n'))
+  );
 
-  if (badgeTitle) {
-    if (result.steps && result.steps.length > 0 && result.steps[0].label) {
-      badgeTitle.textContent = result.steps[0].label;
-    } else {
-      badgeTitle.textContent = 'Pointy Assistant';
-    }
-  }
+  const showChatActions = !isPointing;
+  typeOutSpeechBubble(spoken, detailed, hasExtra, showChatActions);
 }
 
 /**
@@ -1080,14 +1534,14 @@ function handlePointAt(result, audioBase64 = null, conversation = null, question
     applyCardSizing('', true);
     lastAnswerTurn = { question, result, step: result.steps?.[0] || null };
   } else {
-    // Single answer mode: display ONLY this answer!
+    // Single answer mode: save last turn
     lastAnswerTurn = { question, result, step: result.steps?.[0] || null };
-    renderSingleAnswer(result, question);
   }
 
   // If question was not found and not a detailed explanation
   if (!result.found && !result.detailed_explanation) {
     const fallbackText = result.reply || "I couldn't locate what you asked for. Try asking another question!";
+    positionBubbleAtCursor();
     showAnswerBesideCursor(fallbackText, null, isChatModeActive);
     if (audioBase64) {
       playAudioBase64(audioBase64, isChatModeActive);
@@ -1099,7 +1553,7 @@ function handlePointAt(result, audioBase64 = null, conversation = null, question
   if (result.steps && result.steps.length > 0) {
     currentSteps = result.steps;
     currentStepIndex = 0;
-    pointToStep(0, answerContent, audioBase64, isChatModeActive);
+    pointToStep(0, answerContent, audioBase64, isChatModeActive, result, question);
   } else {
     currentSteps = [];
     currentStepIndex = 0;
@@ -1107,11 +1561,14 @@ function handlePointAt(result, audioBase64 = null, conversation = null, question
     if (audioBase64) {
       playAudioBase64(audioBase64, isChatModeActive);
     }
-    showAnswerBesideCursor(answerContent, null, isChatModeActive);
+    if (!isChatModeActive) {
+      positionBubbleAtCursor();
+      renderSingleAnswer(result, question);
+    }
   }
 }
 
-function pointToStep(index, fullText = null, audioBase64 = null, isChat = false) {
+function pointToStep(index, fullText = null, audioBase64 = null, isChat = false, result = null, question = null) {
   cancelStandbyGlide();
   if (index >= currentSteps.length) {
     if (!isChat) {
@@ -1166,12 +1623,16 @@ function pointToStep(index, fullText = null, audioBase64 = null, isChat = false)
   // 3. Keep answer card hidden while flying
   cursorAnswerCard.classList.add('hidden');
 
-  const displayText = fullText || step.instruction || step.label || 'Here it is!';
-
-  // When cursor arrives at target (~540ms), reveal answer text card beside cursor
+  // When cursor arrives at target (~540ms), reveal answer speech bubble beside cursor
   setTimeout(() => {
     spawnParticles(cx, cy, 14);
-    showAnswerBesideCursor(displayText, step, isChat);
+    positionBubbleAtCursor(cx, cy);
+    if (!isChat && result) {
+      renderSingleAnswer(result, question);
+    } else {
+      const displayText = fullText || step.instruction || step.label || 'Here it is!';
+      showAnswerBesideCursor(displayText, step, isChat);
+    }
   }, 540);
 }
 
@@ -1180,54 +1641,29 @@ function goToNextStep() {
   if (currentStepIndex >= currentSteps.length) {
     resetToStandby();
   } else {
-    pointToStep(currentStepIndex, null, null, isChatModeActive);
+    pointToStep(currentStepIndex, null, null, isChatModeActive, lastAnswerTurn?.result, lastAnswerTurn?.question);
   }
 }
 
-// ─── Display Answer Text Beside Red Cursor ───────────────────────────
+// ─── Display Answer Text Inside Minimalist Outgoing Speech Bubble ────
 function showAnswerBesideCursor(text, step, isChat = false) {
-  cursorAnswerCard.classList.remove('hidden');
-  repositionAnswerCard();
-
-  // Multi-step counter & buttons
-  if (currentSteps && currentSteps.length > 1) {
-    answerCardFooter.classList.remove('hidden');
-    answerStepInfo.textContent = `Step ${currentStepIndex + 1} of ${currentSteps.length}`;
-    if (currentStepIndex === currentSteps.length - 1) {
-      answerNextBtn.textContent = 'Finish';
-    } else {
-      answerNextBtn.textContent = 'Next Step →';
-    }
-  } else {
-    answerCardFooter.classList.add('hidden');
+  if (text) {
+    positionBubbleAtCursor();
+    // When pointing at an element/step, never show chat actions — just show the pure text!
+    const showChatActions = !step && !isChat;
+    typeOutSpeechBubble(text, '', false, showChatActions);
   }
 }
 
 function repositionAnswerCard() {
-  const cardWidth = cursorAnswerCard.offsetWidth || (isChatModeActive ? 520 : 320);
-  const cardHeight = cursorAnswerCard.offsetHeight || (isChatModeActive ? 400 : 160);
-  const cursorX = currentCursorPos.x;
-  const cursorY = currentCursorPos.y;
-
-  // Check if overflowing on right side
-  if (cursorX + cardWidth + 50 > window.innerWidth) {
-    cursorAnswerCard.classList.add('flipped-left');
-  } else {
-    cursorAnswerCard.classList.remove('flipped-left');
-  }
-
-  // Check vertical position so it doesn't run off bottom
-  if (cursorY + cardHeight > window.innerHeight) {
-    cursorAnswerCard.style.top = `-${Math.max(80, cardHeight - 50)}px`;
-  } else {
-    cursorAnswerCard.style.top = '-16px';
-  }
+  positionBubbleAtCursor();
 }
 
 // ─── Google Cloud TTS Audio Playback (High-fidelity voice) ───────────
 function playAudioBase64(base64, isChat = false) {
   if (!base64) return;
   try {
+
     if (activeAudio) {
       activeAudio.pause();
       activeAudio = null;
@@ -1286,11 +1722,21 @@ function resetToStandby() {
   manualCardHeight = null;
   cursorAnswerCard.style.width = '';
   cursorAnswerCard.style.height = '';
-  cursorAnswerCard.classList.remove('chat-mode', 'size-compact', 'size-medium', 'size-expanded', 'manually-resized', 'assistant-mode');
+  cursorAnswerCard.classList.remove('chat-mode', 'size-compact', 'size-medium', 'size-expanded', 'manually-resized', 'assistant-mode', 'is-speaking', 'details-open');
 
   if (activeAudio) {
     activeAudio.pause();
     activeAudio = null;
+  }
+
+  if (activeStreamingTimer) {
+    clearInterval(activeStreamingTimer);
+    activeStreamingTimer = null;
+  }
+
+  if (activeTypingTimer) {
+    clearInterval(activeTypingTimer);
+    activeTypingTimer = null;
   }
 
   cursorAnswerCard.classList.add('hidden');

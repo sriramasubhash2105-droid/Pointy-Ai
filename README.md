@@ -111,7 +111,7 @@ pointy-ai/
 │   │   ├── main.js               # Electron main process & orchestration
 │   │   ├── preload.js            # IPC bridge
 │   │   └── services/
-│   │       ├── gemini-service.js  # 🧠 Gemini Flash 2.5 (vision + reasoning)
+│   │       ├── gemini-service.js  # 🧠 Gemini 3.5 Flash-Lite (vision + reasoning)
 │   │       └── gnani-service.js   # 🔊 Prisma (STT) + Timbre (TTS)
 │   └── renderer/
 │       ├── overlay.html          # Overlay UI

@@ -37,70 +37,66 @@
       </button>
     </div>
 
-    <!-- Floating Answer Card / Conversation Hub (Anchored directly beside the red cursor at target!) -->
-    <div id="cursor-answer-card" class="cursor-answer-card hidden">
-      <div class="answer-card-header">
-        <div class="answer-badge">
-          <span class="badge-dot"></span>
-          <span id="badge-title" class="badge-title">Pointy Assistant</span>
-        </div>
-        <div class="answer-header-actions">
-          <div class="answer-speaking-indicator">
-            <span class="speak-wave"></span>
-            <span class="speak-wave"></span>
-            <span class="speak-wave"></span>
-            <span class="speak-label">Speaking</span>
-          </div>
-          <button id="btn-new-chat" class="header-action-btn" title="Start a fresh chat session">
-            <span class="action-icon">✨</span>
-            <span class="action-text">New Chat</span>
-          </button>
-          <button id="answer-close-btn" class="answer-close-btn" title="Close (Escape)">✕</button>
-        </div>
+  </div>
+
+  <!-- Minimalist Light-Red Outgoing Speech Bubble (Centered slightly above midpoint) -->
+  <div id="cursor-answer-card" class="speech-bubble-wrapper hidden">
+    <div id="speech-bubble" class="chat-speech-bubble">
+      <div id="bubble-text-content" class="bubble-text-content"><span id="bubble-text"></span><span id="bubble-cursor" class="typing-cursor"></span></div>
+
+      <!-- Adaptive outgoing tail: points towards Pointy whether on left or right -->
+      <svg id="bubble-tail-right" class="bubble-tail-svg tail-right" viewBox="0 0 8 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M0,0 C0.5,4 2.5,9.5 8,11.5 C4.5,11.5 1.5,9.5 0.2,6 Z" fill="rgba(195, 0, 0, 0.82)" />
+        <path d="M0,12 C3,12 5.5,12 8,11.5 C4.5,11.5 1.5,9.5 0.2,6" stroke="rgba(255, 255, 255, 0.18)" stroke-width="1" />
+        <line x1="0" y1="0" x2="0" y2="12" stroke="rgba(195, 0, 0, 0.82)" stroke-width="2" />
+      </svg>
+      <svg id="bubble-tail-left" class="bubble-tail-svg tail-left" viewBox="0 0 8 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8,0 C7.5,4 5.5,9.5 0,11.5 C3.5,11.5 6.5,9.5 7.8,6 Z" fill="rgba(195, 0, 0, 0.82)" />
+        <path d="M8,12 C5,12 2.5,12 0,11.5 C3.5,11.5 6.5,9.5 7.8,6" stroke="rgba(255, 255, 255, 0.18)" stroke-width="1" />
+        <line x1="8" y1="0" x2="8" y2="12" stroke="rgba(195, 0, 0, 0.82)" stroke-width="2" />
+      </svg>
+
+      <!-- Optional minimalist View Details toggle -->
+      <div id="bubble-details-container" class="bubble-details-container hidden">
+        <div id="bubble-details-toggle" class="bubble-details-toggle" role="button">view full details ▾</div>
+        <div id="bubble-details-body" class="bubble-details-body collapsed"></div>
       </div>
 
-      <div class="answer-card-body">
-        <!-- Multi-turn Conversation Stream (Just like ChatGPT / Gemini) -->
-        <div id="chat-stream" class="chat-stream">
-          <div id="answer-card-text" class="answer-card-text">Here is the solution!</div>
-        </div>
-      </div>
-
-      <!-- Follow-up input bar: Enables back-and-forth conversation continuity -->
-      <div id="card-input-bar" class="card-input-bar">
-        <input type="text" id="card-chat-input" class="card-chat-input" placeholder="Ask follow-up or continue chatting..." autocomplete="off" />
-        <button id="card-chat-mic" class="card-input-btn mic" title="Ask follow-up with voice">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-          </svg>
+      <!-- Quick chat actions: Continue chat / New chat -->
+      <div id="bubble-actions" class="bubble-actions hidden">
+        <button id="bubble-btn-continue" class="bubble-action-btn" title="Continue conversation">
+          <span class="bubble-action-icon">💬</span> Continue chat
         </button>
-        <button id="card-chat-send" class="card-input-btn send" title="Send question (Enter)">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-          </svg>
+        <button id="bubble-btn-new" class="bubble-action-btn" title="Start a fresh new conversation">
+          <span class="bubble-action-icon">✨</span> New chat
         </button>
       </div>
 
-      <div id="answer-card-footer" class="answer-card-footer hidden">
-        <span id="answer-step-info" class="answer-step-info">Step 1 of 1</span>
-        <div class="answer-buttons">
-          <button id="answer-skip-btn" class="answer-btn secondary">Done</button>
-          <button id="answer-next-btn" class="answer-btn primary">Next Step →</button>
-        </div>
-      </div>
-
-      <!-- Arrow pointer pointing towards the red cursor -->
-      <div class="answer-card-caret"></div>
-
-      <!-- Interactive Corner Resize Handle -->
-      <div id="card-resize-handle" class="card-resize-handle" title="Drag to resize card">
-        <svg viewBox="0 0 10 10" width="10" height="10">
-          <line x1="9" y1="1" x2="1" y2="9" stroke="rgba(255, 45, 85, 0.55)" stroke-width="1.5" stroke-linecap="round"/>
-          <line x1="9" y1="5" x2="5" y2="9" stroke="rgba(255, 45, 85, 0.55)" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
+      <!-- Inline reply bar for continuing or starting new chat -->
+      <div id="bubble-reply-bar" class="bubble-reply-bar hidden">
+        <input type="text" id="bubble-reply-input" class="bubble-reply-input" placeholder="Ask a follow-up..." autocomplete="off" />
+        <button id="bubble-reply-mic" class="bubble-reply-btn mic" title="Speak question (Alt+C / F8)">🎙️</button>
+        <button id="bubble-reply-send" class="bubble-reply-btn send" title="Send (Enter)">→</button>
       </div>
     </div>
+
+    <!-- Hidden elements kept for legacy code safety -->
+    <div id="chat-stream" style="display:none"></div>
+    <div id="answer-card-text" style="display:none"></div>
+    <div id="badge-title" style="display:none"></div>
+    <div id="btn-new-chat" style="display:none"></div>
+    <button id="answer-close-btn" style="display:none"></button>
+    <button id="answer-next-btn" style="display:none"></button>
+    <button id="answer-skip-btn" style="display:none"></button>
+    <div id="card-input-bar" style="display:none">
+      <input type="text" id="card-chat-input" style="display:none" />
+      <button id="card-chat-mic" style="display:none"></button>
+      <button id="card-chat-send" style="display:none"></button>
+    </div>
+    <div id="answer-card-footer" style="display:none">
+      <span id="answer-step-info"></span>
+    </div>
+    <div id="card-resize-handle" style="display:none"></div>
   </div>
 
 
