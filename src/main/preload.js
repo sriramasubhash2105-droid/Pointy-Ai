@@ -45,6 +45,13 @@ contextBridge.exposeInMainWorld('pointyAPI', {
   getAllConversations: () => ipcRenderer.invoke('get-all-conversations'),
   switchConversation: (id) => ipcRenderer.invoke('switch-conversation', id),
   onConversationUpdated: (callback) => ipcRenderer.on('conversation-updated', (_, data) => callback(data)),
+
+  // Multi-step Guidance (Settings -> Target, Menus -> Submenus)
+  advanceMultiStep: () => ipcRenderer.invoke('advance-multi-step'),
+  cancelMultiStep: () => ipcRenderer.invoke('cancel-multi-step'),
+  onMultiStepWaiting: (callback) => ipcRenderer.on('multi-step-waiting', (_, data) => callback(data)),
+  onMultiStepLoading: (callback) => ipcRenderer.on('multi-step-loading', (_, data) => callback(data)),
+  onMultiStepError: (callback) => ipcRenderer.on('multi-step-error', (_, data) => callback(data)),
 });
 
 // Full ChatGPT Desktop Application API

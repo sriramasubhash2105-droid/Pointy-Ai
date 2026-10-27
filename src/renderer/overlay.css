@@ -551,26 +551,77 @@ body {
   color: #ffffff;
 }
 
-/* ─── Speech Bubble Actions: Continue chat / New chat ─────────────── */
-.chat-speech-bubble:has(.bubble-actions:not(.hidden)),
-.chat-speech-bubble:has(.bubble-reply-bar:not(.hidden)) {
-  min-width: 290px;
+/* ─── Speech Bubble Actions: Suppressed in floating card per user request ─── */
+.bubble-actions,
+.bubble-actions.hidden,
+.bubble-reply-bar,
+.bubble-reply-bar.hidden,
+.bubble-action-btn {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
-.bubble-actions {
+/* ─── Multi-step Guidance Bar (Step 1 of 2, Next Step button) ───────── */
+.bubble-multistep-bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
-  width: 100%;
-  animation: bubble-fade-in 0.22s ease-out;
-  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  font-family: inherit;
 }
 
-.bubble-actions.hidden {
+.bubble-multistep-bar.hidden {
   display: none !important;
+}
+
+.multistep-pill {
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+  padding: 1.5px 7px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bubble-btn-next-step {
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 11px;
+  padding: 2px 8px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: all 0.16s ease;
+  user-select: none;
+}
+
+.bubble-btn-next-step:hover {
+  background: rgba(255, 255, 255, 0.36);
+  border-color: rgba(255, 255, 255, 0.55);
+  transform: translateY(-1px);
+}
+
+.bubble-btn-next-step:active {
+  transform: translateY(0);
 }
 
 @keyframes bubble-fade-in {

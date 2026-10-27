@@ -42,6 +42,12 @@
   <!-- Minimalist Light-Red Outgoing Speech Bubble (Centered slightly above midpoint) -->
   <div id="cursor-answer-card" class="speech-bubble-wrapper hidden">
     <div id="speech-bubble" class="chat-speech-bubble">
+      <!-- Multi-step guidance bar: Step 1 of 2 & Next Step button -->
+      <div id="bubble-multistep-bar" class="bubble-multistep-bar hidden">
+        <span class="multistep-pill" id="bubble-step-badge">Step 1 of 2</span>
+        <button id="bubble-btn-next-step" class="bubble-btn-next-step" title="Click or click the highlighted item on screen">Next Step →</button>
+      </div>
+
       <div id="bubble-text-content" class="bubble-text-content"><span id="bubble-text"></span><span id="bubble-cursor" class="typing-cursor"></span></div>
 
       <!-- Adaptive outgoing tail: points towards Pointy whether on left or right -->
@@ -62,25 +68,17 @@
         <div id="bubble-details-body" class="bubble-details-body collapsed"></div>
       </div>
 
-      <!-- Quick chat actions: Continue chat / New chat -->
-      <div id="bubble-actions" class="bubble-actions hidden">
-        <button id="bubble-btn-continue" class="bubble-action-btn" title="Continue conversation">
-          <span class="bubble-action-icon">💬</span> Continue chat
-        </button>
-        <button id="bubble-btn-new" class="bubble-action-btn" title="Start a fresh new conversation">
-          <span class="bubble-action-icon">✨</span> New chat
-        </button>
-      </div>
-
-      <!-- Inline reply bar for continuing or starting new chat -->
-      <div id="bubble-reply-bar" class="bubble-reply-bar hidden">
-        <input type="text" id="bubble-reply-input" class="bubble-reply-input" placeholder="Ask a follow-up..." autocomplete="off" />
-        <button id="bubble-reply-mic" class="bubble-reply-btn mic" title="Speak question (Alt+C / F8)">🎙️</button>
-        <button id="bubble-reply-send" class="bubble-reply-btn send" title="Send (Enter)">→</button>
-      </div>
     </div>
-
-    <!-- Hidden elements kept for legacy code safety -->
+    <!-- Hidden elements kept for legacy code safety (Actions suppressed in floating card) -->
+    <div id="bubble-actions" style="display:none !important;">
+      <button id="bubble-btn-continue" style="display:none !important;"></button>
+      <button id="bubble-btn-new" style="display:none !important;"></button>
+    </div>
+    <div id="bubble-reply-bar" style="display:none !important;">
+      <input type="text" id="bubble-reply-input" style="display:none !important;" />
+      <button id="bubble-reply-mic" style="display:none !important;"></button>
+      <button id="bubble-reply-send" style="display:none !important;"></button>
+    </div>
     <div id="chat-stream" style="display:none"></div>
     <div id="answer-card-text" style="display:none"></div>
     <div id="badge-title" style="display:none"></div>

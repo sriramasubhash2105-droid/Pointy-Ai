@@ -46,6 +46,7 @@ const { GeminiService } = require('./services/gemini-service');
 const { AssemblyAIService } = require('./services/assemblyai-service');
 const { GoogleTTSService } = require('./services/google-tts-service');
 const { ConversationManager } = require('./services/conversation-manager');
+const { MouseWatcherService } = require('./services/mouse-watcher-service');
 
 // Ensure single instance to prevent hotkey conflicts
 const gotTheLock = app.requestSingleInstanceLock();
@@ -75,6 +76,7 @@ let gnaniService = null;
 let geminiService = null;
 let googleTtsService = null;
 let conversationManager = null;
+let mouseWatcherService = null;
 let appState = 'idle'; // idle | listening | thinking | pointing
 
 // ─── App Configuration ───────────────────────────────────────────────
@@ -83,7 +85,7 @@ const CONFIG = {
   assemblyaiApiKey: process.env.ASSEMBLYAI_API_KEY || '',
   gnaniApiKey: process.env.GNANI_API_KEY || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3-flash-preview',
   googleTtsApiKey: process.env.GOOGLE_TTS_API_KEY || process.env.GEMINI_API_KEY || '',
 };
 
@@ -533,6 +535,181 @@ async function processTypedQuestion(question) {
   }
 }
 
+// ─── Multi-step Guidance Engine (Settings -> Submenus, Multi-turn Pointing) ──
+let activeMultiStep = null;
+let multiStepTimeoutTimer = null;
+let isAdvancingMultiStep = false;
+
+function clearMultiStepTimer() {
+  if (multiStepTimeoutTimer) {
+    clearTimeout(multiStepTimeoutTimer);
+    multiStepTimeoutTimer = null;
+  }
+}
+
+function clearMultiStep() {
+  clearMultiStepTimer();
+  activeMultiStep = null;
+  isAdvancingMultiStep = false;
+}
+
+function startMultiStepWaiting(info) {
+  clearMultiStepTimer();
+  activeMultiStep = {
+    ...info,
+    arrivedAt: Date.now() + 540,
+    waitingForClick: true,
+  };
+
+  logToFile(`⏳ Multi-step active (Step ${info.stepIndex}/${info.totalSteps}): waiting for user click on "${info.stepLabel}" to reveal "${info.nextTarget}"`);
+
+  overlayWindow?.webContents.send('multi-step-waiting', {
+    stepIndex: info.stepIndex,
+    totalSteps: info.totalSteps,
+    stepLabel: info.stepLabel,
+    nextTarget: info.nextTarget,
+  });
+
+  // Keep alive for 35 seconds waiting for user click/action
+  multiStepTimeoutTimer = setTimeout(() => {
+    if (activeMultiStep) {
+      logToFile('⌛ Multi-step timed out after 35s of inactivity.');
+      clearMultiStep();
+    }
+  }, 35000);
+}
+
+async function advanceMultiStep() {
+  if (!activeMultiStep || isAdvancingMultiStep) return;
+  isAdvancingMultiStep = true;
+  clearMultiStepTimer();
+
+  const currentStep = activeMultiStep.stepIndex || 1;
+  const nextStepIndex = currentStep + 1;
+  const { goal, nextTarget, stepLabel, language, stepHistory = [], totalSteps = 3 } = activeMultiStep;
+  const updatedHistory = [...stepHistory];
+  if (stepLabel && !updatedHistory.includes(stepLabel)) {
+    updatedHistory.push(stepLabel);
+  }
+
+  logToFile(`🔄 Advancing multi-step: user clicked "${stepLabel}", analyzing updated screen for Step ${nextStepIndex} ("${nextTarget}")...`);
+
+  overlayWindow?.webContents.send('multi-step-loading', {
+    stepIndex: nextStepIndex,
+    totalSteps: Math.max(nextStepIndex, totalSteps),
+    goal,
+    nextTarget,
+  });
+
+  try {
+    // 1. Wait 450ms for UI / modal / menu animation to render
+    await new Promise((r) => setTimeout(r, 450));
+
+    // 2. Capture updated screen buffer
+    const newScreenshot = await captureScreenBuffer();
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const displayInfo = {
+      scaleFactor: primaryDisplay.scaleFactor,
+      width: primaryDisplay.size.width,
+      height: primaryDisplay.size.height,
+    };
+
+    // 3. Ask Gemini for this step (evaluates whether goal is reached or next intermediate step needed)
+    const resultNext = await geminiService.analyzeNextStep(
+      newScreenshot,
+      goal,
+      nextTarget,
+      updatedHistory,
+      nextStepIndex,
+      Math.max(nextStepIndex, totalSteps),
+      language,
+      displayInfo
+    );
+
+    logToFile(`✅ Multi-step ${nextStepIndex} response: mode=${resultNext.mode}, multi_step=${resultNext.multi_step}, is_final_step=${resultNext.is_final_step}, reply="${resultNext.reply}", steps=${resultNext.steps?.length || 0}`);
+
+    // Record in conversation memory
+    conversationManager?.addMessage('assistant', resultNext);
+    const activeConv = conversationManager ? conversationManager.getActiveConversation() : null;
+
+    // 4. Synthesize speech for this step
+    const spokenSentence = googleTtsService ? googleTtsService.extractFirstSentence(resultNext.reply) : resultNext.reply;
+    let audioBase64 = null;
+    if (spokenSentence && googleTtsService && googleTtsService.hasApiKey()) {
+      try {
+        audioBase64 = await googleTtsService.speak(spokenSentence, resultNext.reply_lang || language);
+      } catch (ttsErr) {
+        logToFile(`TTS step ${nextStepIndex} error: ${ttsErr.message}`);
+      }
+    }
+
+    // 5. Check if MORE steps remain or if this is the final target!
+    const isContinuing = !!resultNext.multi_step && !resultNext.is_final_step && nextStepIndex < 7;
+
+    if (isContinuing && resultNext.steps && resultNext.steps.length > 0) {
+      isAdvancingMultiStep = false;
+      const nextTotal = Math.max(nextStepIndex + 1, resultNext.total_steps || (nextStepIndex + 1));
+      startMultiStepWaiting({
+        goal: resultNext.goal || goal,
+        nextTarget: resultNext.next_target || goal,
+        stepIndex: nextStepIndex,
+        totalSteps: nextTotal,
+        stepLabel: resultNext.steps[0].label || 'the item',
+        targetBox: resultNext.steps[0],
+        stepHistory: updatedHistory,
+        language,
+      });
+    } else {
+      // Completed all steps!
+      clearMultiStep();
+    }
+
+    // 6. Point to the element on the newly updated screen!
+    appState = 'pointing';
+    stopMouseTracking();
+    overlayWindow?.moveTop();
+    overlayWindow?.webContents.send('state-change', 'pointing');
+    overlayWindow?.webContents.send('point-at', {
+      result: resultNext,
+      audioBase64,
+      conversation: activeConv,
+      question: goal,
+    });
+
+  } catch (err) {
+    logToFile(`❌ Multi-step advance error: ${err.message}`);
+    clearMultiStep();
+    overlayWindow?.webContents.send('multi-step-error', { error: err.message });
+  }
+}
+
+function setupMouseWatcher() {
+  if (!mouseWatcherService) return;
+  mouseWatcherService.on('click', (pt) => {
+    if (activeMultiStep && activeMultiStep.waitingForClick && !isAdvancingMultiStep) {
+      if (Date.now() < activeMultiStep.arrivedAt + 450) return;
+
+      const box = activeMultiStep.targetBox;
+      let isNearTarget = true;
+      if (box && box.x != null && box.y != null) {
+        const minX = Math.max(0, box.x - 80);
+        const maxX = box.x + (box.w || 60) + 80;
+        const minY = Math.max(0, box.y - 80);
+        const maxY = box.y + (box.h || 40) + 80;
+        isNearTarget = (pt.x >= minX && pt.x <= maxX && pt.y >= minY && pt.y <= maxY);
+      }
+
+      if (isNearTarget) {
+        logToFile(`🖱️ User clicked target "${activeMultiStep.stepLabel}" at (${pt.x}, ${pt.y})`);
+        advanceMultiStep();
+      } else if (Date.now() > activeMultiStep.arrivedAt + 1200) {
+        logToFile(`🖱️ User clicked screen at (${pt.x}, ${pt.y}) during multi-step`);
+        advanceMultiStep();
+      }
+    }
+  });
+}
+
 // ─── Core: Send screenshot to Gemini and point at result ─────────────
 async function analyzeAndPoint(screenshotBuffer, question, language) {
   const primaryDisplay = screen.getPrimaryDisplay();
@@ -545,8 +722,8 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
   let result;
 
   // 1. Record user turn in persistent conversation memory
+  const conversationHistory = conversationManager ? conversationManager.getGeminiHistory(4) : [];
   conversationManager?.addMessage('user', question);
-  const conversationHistory = conversationManager ? conversationManager.getGeminiHistory() : [];
 
   if (geminiService.hasApiKey()) {
     logToFile(`🧠 Asking Gemini model for: "${question}" (history turns: ${conversationHistory.length})`);
@@ -573,6 +750,22 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
     } catch (ttsErr) {
       logToFile(`⚠️ Google Cloud TTS error: ${ttsErr.message}`);
     }
+  }
+
+  // 4. Handle multi-step guidance if target requires opening menus/settings first
+  if (result.multi_step && !result.is_final_step && result.steps && result.steps.length > 0) {
+    startMultiStepWaiting({
+      goal: result.goal || question,
+      nextTarget: result.next_target || question,
+      stepIndex: result.step_index || 1,
+      totalSteps: Math.max(2, result.total_steps || 3),
+      stepLabel: result.steps[0].label || 'the item',
+      targetBox: result.steps[0],
+      stepHistory: [result.steps[0].label || 'Initial launcher'],
+      language,
+    });
+  } else {
+    clearMultiStep();
   }
 
   // Point at the target elements and start speaking simultaneously as cursor begins moving!
@@ -676,6 +869,7 @@ function getDemoResponse(question) {
 
 // ─── Reset to idle state ─────────────────────────────────────────────
 function resetState() {
+  clearMultiStep();
   appState = 'idle';
   startMouseTracking();
   overlayWindow?.webContents.send('state-change', 'idle');
@@ -791,6 +985,20 @@ function setupIPC() {
     return conv;
   });
 
+  // Multi-step guidance manual controls
+  ipcMain.handle('advance-multi-step', async () => {
+    logToFile('🖱️ User triggered advance-multi-step via IPC');
+    await advanceMultiStep();
+    return true;
+  });
+
+  ipcMain.handle('cancel-multi-step', () => {
+    logToFile('❌ Multi-step canceled via IPC');
+    clearMultiStep();
+    resetState();
+    return true;
+  });
+
   // ─── ChatGPT Desktop Application IPC Handlers ───────────────────────
   ipcMain.handle('chat-get-conversations', () => {
     if (!conversationManager) return [];
@@ -874,13 +1082,13 @@ function setupIPC() {
           width: primaryDisplay.size.width,
           height: primaryDisplay.size.height,
         };
-        const history = conversationManager.getGeminiHistory(12);
+        const history = conversationManager.getGeminiHistory(4);
         const visionResult = await geminiService.analyzeScreen(screenshotBuf, text, 'en-US', displayInfo, history);
         assistantText = visionResult.detailed_explanation || visionResult.reply || 'Screen analyzed successfully.';
         steps = visionResult.steps || [];
       } else if (geminiService && geminiService.hasApiKey()) {
-        const history = conversationManager.getGeminiHistory(14);
-        const activeModel = model || process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3.5-flash-lite';
+        const history = conversationManager.getGeminiHistory(4);
+        const activeModel = model || process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3-flash-preview';
         assistantText = await geminiService.generateChatResponse(text, history, { model: activeModel });
       } else {
         assistantText = `I heard: "${text}".\n\nTo enable full intelligent Pointy AI reasoning and multi-turn capabilities, please enter your **Gemini API Key** in the **Settings (⚙️)** panel. You can obtain a free key at [Google AI Studio](https://aistudio.google.com/apikey).`;
@@ -921,8 +1129,8 @@ function setupIPC() {
       GEMINI_API_KEY: process.env.GEMINI_API_KEY || CONFIG.geminiApiKey || '',
       geminiApiKey: process.env.GEMINI_API_KEY || CONFIG.geminiApiKey || '',
       geminiApiKeyMasked: mask(process.env.GEMINI_API_KEY || CONFIG.geminiApiKey),
-      GEMINI_MODEL: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-2.5-flash',
-      geminiModel: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-2.5-flash',
+      GEMINI_MODEL: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3-flash-preview',
+      geminiModel: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3-flash-preview',
       GOOGLE_TTS_API_KEY: process.env.GOOGLE_TTS_API_KEY || CONFIG.googleTtsApiKey || '',
       googleTtsApiKey: process.env.GOOGLE_TTS_API_KEY || CONFIG.googleTtsApiKey || '',
       googleTtsApiKeyMasked: mask(process.env.GOOGLE_TTS_API_KEY || CONFIG.googleTtsApiKey),
@@ -989,11 +1197,11 @@ function setupIPC() {
       const { GoogleGenAI } = require('@google/genai');
       const testAi = new GoogleGenAI({ apiKey: key });
       const resp = await testAi.models.generateContent({
-        model: 'gemini-3.5-flash-lite',
+        model: 'gemini-3-flash-preview',
         contents: 'Ping',
       });
       const modelResponse = resp.text ? resp.text.trim() : 'Connected';
-      return { success: true, message: 'Connected to Gemini 3.5 Flash-Lite successfully!', modelResponse };
+      return { success: true, message: 'Connected to Gemini 3 Flash successfully!', modelResponse };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -1044,6 +1252,16 @@ app.whenReady().then(async () => {
   setupIPC();
   registerHotkeys();
 
+  // Initialize native OS mouse click listener for multi-step guidance
+  try {
+    mouseWatcherService = new MouseWatcherService();
+    mouseWatcherService.start();
+    setupMouseWatcher();
+    console.log('[Pointy] 🖱️ Native mouse watcher initialized for multi-step guidance');
+  } catch (mErr) {
+    console.warn('[Pointy] Mouse watcher init notice:', mErr.message);
+  }
+
   console.log('[Pointy] 🔴 Pointy AI - Spatial Red Cursor running!');
   console.log('[Pointy] 🎙️ Summon via: Alt+C OR F8 OR Ctrl+Space OR click the Red Cursor');
   console.log('[Pointy] 🎯 The Red AI Cursor pops out right from your mouse!');
@@ -1074,6 +1292,8 @@ app.whenReady().then(async () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  mouseWatcherService?.stop();
+  clearMultiStep();
 });
 
 app.on('window-all-closed', (e) => {

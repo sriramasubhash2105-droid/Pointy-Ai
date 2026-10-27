@@ -26,6 +26,12 @@ const answerCloseBtn = document.getElementById('answer-close-btn');
 const badgeTitle = document.getElementById('badge-title');
 const cardResizeHandle = document.getElementById('card-resize-handle');
 
+// Multi-step elements inside speech bubble
+const bubbleMultistepBar = document.getElementById('bubble-multistep-bar');
+const bubbleStepBadge = document.getElementById('bubble-step-badge');
+const bubbleBtnNextStep = document.getElementById('bubble-btn-next-step');
+
+let activeMultiStepInfo = null;
 let activeConversation = null;
 let currentAnswerMode = 'pointer'; // 'pointer' | 'assistant'
 let answerDismissTimer = null;
@@ -188,6 +194,44 @@ function setupIPCListeners() {
   window.pointyAPI.onReset(() => {
     resetToStandby();
   });
+
+  // Multi-step guidance events
+  window.pointyAPI.onMultiStepWaiting?.((data) => {
+    console.log('[Overlay] Multi-step waiting for user click:', data);
+    activeMultiStepInfo = data;
+    if (bubbleStepBadge) {
+      bubbleStepBadge.textContent = `Step ${data.stepIndex || 1} of ${data.totalSteps || 3}`;
+    }
+    bubbleBtnNextStep?.classList.remove('hidden');
+    bubbleMultistepBar?.classList.remove('hidden');
+    positionBubbleAtCursor();
+  });
+
+  window.pointyAPI.onMultiStepLoading?.((data) => {
+    console.log('[Overlay] Multi-step loading next step:', data);
+    activeMultiStepInfo = data;
+    if (bubbleStepBadge) {
+      bubbleStepBadge.textContent = `Step ${data.stepIndex || 2} of ${data.totalSteps || (data.stepIndex + 1)}`;
+    }
+    bubbleMultistepBar?.classList.remove('hidden');
+    const bubbleText = document.getElementById('bubble-text');
+    if (bubbleText) {
+      bubbleText.textContent = `Looking for ${data.nextTarget || 'next step'}...`;
+    }
+    cursorLoadingSpinner?.classList.remove('hidden');
+    positionBubbleAtCursor();
+  });
+
+  window.pointyAPI.onMultiStepError?.((data) => {
+    console.warn('[Overlay] Multi-step error:', data);
+    activeMultiStepInfo = null;
+    bubbleMultistepBar?.classList.add('hidden');
+    cursorLoadingSpinner?.classList.add('hidden');
+    showAnswerBesideCursor(`⚠️ ${data.error || 'Could not complete next step'}`, null);
+    setTimeout(() => {
+      resetToStandby();
+    }, 4000);
+  });
 }
 
 // ─── Setup Event Listeners ───────────────────────────────────────────
@@ -238,6 +282,14 @@ function setupEventListeners() {
   btnQuickType?.addEventListener('click', (e) => {
     e.stopPropagation();
     toggleTextInput();
+  });
+
+  // Multi-step Next Step button in speech bubble
+  bubbleBtnNextStep?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    console.log('[Overlay] User clicked Next Step button in speech bubble');
+    if (bubbleMultistepBar) bubbleMultistepBar.classList.add('hidden');
+    window.pointyAPI.advanceMultiStep?.();
   });
 
   // Answer card controls
@@ -1045,7 +1097,7 @@ function setupBubbleChatActions() {
  * in width and height, complete with seamless bottom-right tail, muted blue border,
  * vibrant red gradient, and blinking white cursor.
  */
-function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = false, showChatActions = false) {
+function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = false, showChatActions = false, multiStep = null) {
   if (activeTypingTimer) {
     clearInterval(activeTypingTimer);
     activeTypingTimer = null;
@@ -1066,6 +1118,26 @@ function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = fals
   const speechBubble = document.getElementById('speech-bubble');
 
   if (!bubbleText || !cursorAnswerCard) return;
+
+  // Handle multi-step badge & action bar display
+  if (multiStep) {
+    activeMultiStepInfo = multiStep;
+    if (bubbleStepBadge) {
+      if (multiStep.isFinalStep && multiStep.stepIndex > 1) {
+        bubbleStepBadge.textContent = `Step ${multiStep.stepIndex} of ${multiStep.totalSteps} • Final`;
+      } else {
+        bubbleStepBadge.textContent = `Step ${multiStep.stepIndex} of ${multiStep.totalSteps}`;
+      }
+    }
+    if (multiStep.isFinalStep) {
+      bubbleBtnNextStep?.classList.add('hidden');
+    } else {
+      bubbleBtnNextStep?.classList.remove('hidden');
+    }
+    bubbleMultistepBar?.classList.remove('hidden');
+  } else if (!activeMultiStepInfo) {
+    bubbleMultistepBar?.classList.add('hidden');
+  }
 
   // Reveal speech bubble container anchored to Pointy's position!
   positionBubbleAtCursor();
@@ -1124,20 +1196,18 @@ function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = fals
         setupBubbleDetailsToggle();
       }
 
-      // Reveal chat actions only if allowed (never for pointing queries)
-      if (showChatActions && bubbleActions) {
-        bubbleActions.classList.remove('hidden');
-        setupBubbleChatActions();
-      } else if (bubbleActions) {
+      if (bubbleActions) {
         bubbleActions.classList.add('hidden');
       }
       positionBubbleAtCursor();
 
-      // Briefly hold the finished bubble on screen (8.5 seconds)
+      // Hold bubble on screen: if intermediate step waiting for user click, hold for 35s
+      const isIntermediate = activeMultiStepInfo && !activeMultiStepInfo.isFinalStep;
+      const holdDuration = isIntermediate ? 35000 : 8500;
       if (answerDismissTimer) clearTimeout(answerDismissTimer);
       answerDismissTimer = setTimeout(() => {
         resetToStandby();
-      }, 8500);
+      }, holdDuration);
     }
   }, charDelay);
 
@@ -1156,24 +1226,23 @@ function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = fals
         setupBubbleDetailsToggle();
       }
 
-      if (showChatActions && bubbleActions) {
-        bubbleActions.classList.remove('hidden');
-        setupBubbleChatActions();
-      } else if (bubbleActions) {
+      if (bubbleActions) {
         bubbleActions.classList.add('hidden');
       }
       positionBubbleAtCursor();
 
+      const isIntermediate = activeMultiStepInfo && !activeMultiStepInfo.isFinalStep;
+      const holdDuration = isIntermediate ? 35000 : 8500;
       if (answerDismissTimer) clearTimeout(answerDismissTimer);
       answerDismissTimer = setTimeout(() => {
         resetToStandby();
-      }, 8500);
+      }, holdDuration);
     }
   };
 
   if (speechBubble) {
     speechBubble.onclick = (e) => {
-      if (e.target && e.target.closest('#bubble-details-toggle, #bubble-actions, #bubble-reply-bar')) return;
+      if (e.target && e.target.closest('#bubble-details-toggle, #bubble-actions, #bubble-reply-bar, #bubble-multistep-bar, #bubble-btn-next-step')) return;
       finishInstantly();
     };
   }
@@ -1346,22 +1415,19 @@ function setupCardResize() {
 function renderSingleAnswer(result, question) {
   removeThinkingTurn();
 
-  // When pointing things out, do NOT show continue chat or new chat — just show the text!
-  const isPointing = (result.mode === 'pointer') || (Array.isArray(result.steps) && result.steps.length > 0);
-
+  // Floating card speech bubble: show PURE text only (no continue chat, no new chat)
   const spoken = (result.reply || (result.detailed_explanation ? result.detailed_explanation.split('\n')[0] : '')).trim();
-  const detailed = (result.detailed_explanation || spoken).trim();
-  const hasExtra = !isPointing && !!(
-    detailed &&
-    ((detailed !== spoken && detailed.length > spoken.length + 5) ||
-     detailed.includes('```') ||
-     detailed.includes('###') ||
-     detailed.includes('- ') ||
-     detailed.includes('\n'))
-  );
+  const isMultiStep = !!(result.multi_step || (result.step_index && result.step_index > 1));
+  const multiStep = isMultiStep ? {
+    stepIndex: result.step_index || 1,
+    totalSteps: Math.max(result.step_index || 1, result.total_steps || 2),
+    goal: result.goal || question,
+    nextTarget: result.next_target,
+    isFinalStep: !!result.is_final_step || !result.multi_step,
+    stepLabel: (result.steps && result.steps[0]) ? result.steps[0].label : '',
+  } : null;
 
-  const showChatActions = !isPointing;
-  typeOutSpeechBubble(spoken, detailed, hasExtra, showChatActions);
+  typeOutSpeechBubble(spoken, '', false, false, multiStep);
 }
 
 /**
@@ -1649,9 +1715,8 @@ function goToNextStep() {
 function showAnswerBesideCursor(text, step, isChat = false) {
   if (text) {
     positionBubbleAtCursor();
-    // When pointing at an element/step, never show chat actions — just show the pure text!
-    const showChatActions = !step && !isChat;
-    typeOutSpeechBubble(text, '', false, showChatActions);
+    // Show pure text only in floating speech bubble (no continue chat, no new chat)
+    typeOutSpeechBubble(text, '', false, false);
   }
 }
 
@@ -1741,6 +1806,8 @@ function resetToStandby() {
 
   cursorAnswerCard.classList.add('hidden');
   cursorLoadingSpinner?.classList.add('hidden');
+  bubbleMultistepBar?.classList.add('hidden');
+  activeMultiStepInfo = null;
   hideTextInput();
 
   currentSteps = [];

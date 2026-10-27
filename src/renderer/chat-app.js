@@ -19,7 +19,7 @@
   // ==========================================
   let conversations = [];
   let currentConversationId = null;
-  let currentModel = 'gemini-3.5-flash-lite';
+  let currentModel = 'gemini-3-flash-preview';
   let isThinkMode = false;
   let attachedScreenshot = null;
   let isVoiceRecording = false;
@@ -28,7 +28,7 @@
 
   // Personalization defaults
   let userName = localStorage.getItem('chat_user_name') || 'Srirama Subhash';
-  let defaultModel = localStorage.getItem('chat_default_model') || 'gemini-3.5-flash-lite';
+  let defaultModel = localStorage.getItem('chat_default_model') || 'gemini-3-flash-preview';
 
   // ==========================================
   // DOM ELEMENT REFERENCES
@@ -104,11 +104,10 @@
 
   // Friendly reasoning model label mapping
   const MODEL_LABELS = {
-    'gemini-2.5-flash': 'Gemini 2.5 Flash',
-    'gemini-2.0-flash-thinking-exp-01-21': 'Gemini 2.0 Flash Thinking',
-    'gemini-2.0-pro-exp-02-05': 'Gemini 2.0 Pro',
-    'gemini-2.0-pro': 'Gemini 2.0 Pro',
-    'gemini-1.5-pro': 'Gemini 1.5 Pro',
+    'gemini-3-flash-preview': 'Gemini 3 Flash',
+    'gemini-3.5-flash-lite': 'Gemini 3.5 Flash-Lite',
+    'gemini-3.5-flash': 'Gemini 3.5 Flash',
+    'gemini-2.5-flash': 'Gemini 3 Flash',
   };
 
   // Toast
@@ -132,7 +131,7 @@
     const initials = getInitials(userName);
     userAvatarEl.textContent = initials;
     inputUserName.value = userName;
-    currentModel = localStorage.getItem('chat_reasoning_model') || defaultModel || 'gemini-2.5-flash';
+    currentModel = localStorage.getItem('chat_reasoning_model') || defaultModel || 'gemini-3-flash-preview';
     updateModelSelectorLabel(currentModel);
   }
 

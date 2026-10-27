@@ -129,35 +129,49 @@ class ConversationManager {
   }
 
   /**
-   * Format prior conversation turns for Gemini's multi-turn chat API
-   * Returns: [{ role: 'user', parts: [...] }, { role: 'model', parts: [...] }]
+   * Format prior conversation turns for Gemini's multi-turn chat API.
+   * Keeps context lightweight (last 2 completed user/assistant pairs) and uses concise
+   * reply summaries to prevent huge token serialization and high latency.
+   * Excludes any trailing unresponded user question to prevent duplicate consecutive user turns.
    */
-  getGeminiHistory(maxTurns = 12) {
+  getGeminiHistory(maxTurns = 4) {
     const conv = this.getActiveConversation();
     if (!conv || !conv.messages || conv.messages.length === 0) {
       return [];
     }
 
-    // Take last maxTurns (excluding current question being submitted)
-    const recent = conv.messages.slice(-maxTurns);
-    const history = [];
+    // Extract strictly validated alternating user-model pairs going backwards
+    const pairs = [];
+    const msgs = conv.messages;
+    let pendingModel = null;
 
-    for (const msg of recent) {
-      if (msg.role === 'user') {
-        history.push({
-          role: 'user',
-          parts: [{ text: msg.text || '' }],
-        });
-      } else if (msg.role === 'assistant') {
-        // Feed the assistant's previous explanation & response back into model memory
-        const responseText = msg.detailed_explanation || msg.reply || '';
-        history.push({
-          role: 'model',
-          parts: [{ text: responseText }],
-        });
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role === 'assistant') {
+        const text = (m.reply || m.detailed_explanation || '').trim().slice(0, 200);
+        if (text && !pendingModel) {
+          pendingModel = { role: 'model', parts: [{ text }] };
+        }
+      } else if (m.role === 'user') {
+        const text = (m.text || '').trim();
+        if (text && pendingModel) {
+          pairs.unshift({
+            user: { role: 'user', parts: [{ text }] },
+            model: pendingModel,
+          });
+          pendingModel = null;
+          if (pairs.length >= Math.max(1, Math.floor(maxTurns / 2))) {
+            break;
+          }
+        }
       }
     }
 
+    const history = [];
+    for (const pair of pairs) {
+      history.push(pair.user);
+      history.push(pair.model);
+    }
     return history;
   }
 
