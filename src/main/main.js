@@ -47,6 +47,7 @@ const { AssemblyAIService } = require('./services/assemblyai-service');
 const { GoogleTTSService } = require('./services/google-tts-service');
 const { ConversationManager } = require('./services/conversation-manager');
 const { MouseWatcherService } = require('./services/mouse-watcher-service');
+const { ActionService } = require('./services/action-service');
 
 // Ensure single instance to prevent hotkey conflicts
 const gotTheLock = app.requestSingleInstanceLock();
@@ -77,6 +78,7 @@ let geminiService = null;
 let googleTtsService = null;
 let conversationManager = null;
 let mouseWatcherService = null;
+let actionService = null;
 let appState = 'idle'; // idle | listening | thinking | pointing
 
 // ─── App Configuration ───────────────────────────────────────────────
@@ -456,6 +458,59 @@ async function captureScreenBuffer() {
   throw new Error('Screen capture failed');
 }
 
+// ─── Execute Desktop Action (App launch, URL open, system tasks) ─────
+async function executeDesktopAction(action, question, language = 'en-US') {
+  logToFile(`⚡ Executing desktop action: ${action.type} -> "${action.name || action.target || ''}"`);
+
+  const replyText = action.reply || `Opening ${action.name || action.target} for you!`;
+
+  // 1. Run the action detached on OS immediately without blocking!
+  actionService?.execute(action).catch((err) => {
+    logToFile(`⚠️ Action execution warning: ${err.message}`);
+  });
+
+  // 2. Record in conversation memory
+  conversationManager?.addMessage('user', question);
+  const normalizedResult = {
+    mode: 'action',
+    action,
+    found: true,
+    reply: replyText,
+    reply_lang: language,
+    detailed_explanation: `Executed desktop action: **${action.name || action.target}** (${action.type})`,
+    steps: [],
+  };
+  conversationManager?.addMessage('assistant', normalizedResult);
+  const activeConv = conversationManager ? conversationManager.getActiveConversation() : null;
+
+  // 3. Immediately display visual feedback on screen (<5ms)!
+  appState = 'pointing';
+  stopMouseTracking();
+  overlayWindow?.moveTop();
+  overlayWindow?.webContents.send('state-change', 'pointing');
+  overlayWindow?.webContents.send('point-at', {
+    result: normalizedResult,
+    audioBase64: null,
+    conversation: activeConv,
+    question,
+  });
+
+  // 4. Update ChatGPT app window
+  overlayWindow?.webContents.send('conversation-updated', { conversation: activeConv });
+  chatAppWindow?.webContents.send('conversation-updated', { conversation: activeConv });
+
+  // 5. Synthesize speech concurrently in background and play as soon as ready!
+  if (googleTtsService && googleTtsService.hasApiKey()) {
+    googleTtsService.speak(replyText, language).then((audioBase64) => {
+      if (audioBase64 && appState === 'pointing') {
+        overlayWindow?.webContents.send('play-audio', audioBase64);
+      }
+    }).catch((ttsErr) => {
+      logToFile(`TTS action warning: ${ttsErr.message}`);
+    });
+  }
+}
+
 // ─── Process the user's voice question ───────────────────────────────
 async function processQuestion(audioBuffer) {
   try {
@@ -496,6 +551,14 @@ async function processQuestion(audioBuffer) {
     logToFile(`💬 User Transcript: "${transcript}" (${detectedLang})`);
     overlayWindow?.webContents.send('transcript', { text: transcript, lang: detectedLang });
 
+    // Fast-path desktop action check (<5ms zero-latency response)
+    const localAction = actionService?.matchLocalIntent(transcript);
+    if (localAction) {
+      logToFile(`⚡ Fast-path action matched: "${localAction.name}" (${localAction.type})`);
+      await executeDesktopAction(localAction, transcript, detectedLang);
+      return;
+    }
+
     // Step 3: Send screenshot + question to Gemini
     await analyzeAndPoint(screenshotBuffer, transcript, detectedLang);
 
@@ -517,9 +580,17 @@ async function processTypedQuestion(question) {
     overlayWindow?.webContents.send('state-change', 'thinking');
 
     logToFile(`⌨️ Typed question: "${question}"`);
-    const screenshotBuffer = await captureScreenBuffer();
-
     overlayWindow?.webContents.send('transcript', { text: question, lang: 'en-US' });
+
+    // Fast-path desktop action check (<5ms zero-latency response)
+    const localAction = actionService?.matchLocalIntent(question);
+    if (localAction) {
+      logToFile(`⚡ Fast-path action matched: "${localAction.name}" (${localAction.type})`);
+      await executeDesktopAction(localAction, question, 'en-US');
+      return;
+    }
+
+    const screenshotBuffer = await captureScreenBuffer();
 
     // Send screenshot + question to Gemini
     await analyzeAndPoint(screenshotBuffer, question, 'en-US');
@@ -734,6 +805,16 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
     result = getDemoResponse(question);
   }
 
+  // If Gemini recognizes this as a desktop action to execute
+  if (result.mode === 'action' && result.action && actionService) {
+    logToFile(`⚡ Executing action recognized by Gemini: ${result.action.type} -> "${result.action.target}" (${result.action.name || ''})`);
+    try {
+      await actionService.execute(result.action);
+    } catch (actErr) {
+      logToFile(`⚠️ Action execution warning: ${actErr.message}`);
+    }
+  }
+
   // 2. Record assistant turn in persistent conversation memory
   conversationManager?.addMessage('assistant', result);
   const activeConv = conversationManager ? conversationManager.getActiveConversation() : null;
@@ -782,6 +863,20 @@ function getDemoResponse(question) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const sw = primaryDisplay.size.width;
   const sh = primaryDisplay.size.height;
+
+  // Fast demo action check
+  const localAct = actionService ? actionService.matchLocalIntent(question) : null;
+  if (localAct) {
+    actionService.execute(localAct);
+    return {
+      mode: 'action',
+      action: localAct,
+      found: true,
+      reply: localAct.reply || `Opening ${localAct.name || localAct.target} for you!`,
+      reply_lang: 'en-US',
+      steps: [],
+    };
+  }
 
   // Simulate finding UI elements based on common queries
   if (q.includes('setting') || q.includes('gear') || q.includes('config') || q.includes('option')) {
@@ -1074,7 +1169,12 @@ function setupIPC() {
     let steps = [];
 
     try {
-      if (attachScreen) {
+      const localAction = actionService?.matchLocalIntent(text);
+      if (localAction) {
+        logToFile(`⚡ Executing action from chat app: "${localAction.name}" (${localAction.type})`);
+        await actionService.execute(localAction);
+        assistantText = localAction.reply || `Opened ${localAction.name || localAction.target} for you!`;
+      } else if (attachScreen) {
         // Multimodal analysis with screenshot
         const screenshotBuf = await captureScreenBuffer();
         const primaryDisplay = screen.getPrimaryDisplay();
@@ -1238,12 +1338,14 @@ function setupIPC() {
 // ─── App lifecycle ───────────────────────────────────────────────────
 app.whenReady().then(async () => {
   // Initialize services
+  actionService = new ActionService();
   conversationManager = new ConversationManager();
   assemblyaiService = new AssemblyAIService(CONFIG.assemblyaiApiKey);
   gnaniService = new GnaniService(CONFIG.gnaniApiKey);
   geminiService = new GeminiService(CONFIG.geminiApiKey);
   googleTtsService = new GoogleTTSService(CONFIG.googleTtsApiKey);
   googleTtsService.prewarm();
+  console.log('[Pointy] ⚡ ActionService ready (Notepad, YouTube, Browser, System Launcher active)');
 
   // Create windows and tray
   createChatAppWindow();

@@ -61,6 +61,51 @@ CONVERSATIONAL MEMORY & ASSISTANT INTELLIGENCE:
      * "steps": If the question refers to a visible element or window on screen, tightly box it so Pointy can anchor beside it; otherwise leave "steps": [].
      * "found": true
 
+   - DESKTOP ACTION / ASSISTANT EXECUTION INSTRUCTIONS (e.g. "open notepad", "open comet", "open brave", "open antigravity ide", "open claude", "open chrome from student account", "open calendar in brave from work profile", "search nodejs in brave", "ask comet about mars", "play honeypie in brave", "play honeypie on spotify", "play music from apple music", "next song"):
+     * "mode": "action"
+     * "reply": Concise spoken announcement (under 12 words), e.g. "Opening Comet!", "Opening Brave!", "Opening Antigravity IDE!", "Playing Honeypie in Brave!"
+     * "detailed_explanation": "Executed action: [Name]."
+     * "action": {
+         "type": "launch_app" | "windows_app_id" | "open_in_browser" | "browser_profile" | "browser_profile_url" | "youtube_play_browser" | "spotify_play" | "apple_music_play" | "youtube_play" | "media_key" | "open_url" | "open_folder" | "system_uri",
+         "target": "<target path or app identifier>",
+         "browser": "<brave | comet | chrome | edge>",
+         "profileDir": "<Profile directory: e.g. Profile 2 for student, Default for work in Brave, Profile 5 for work in Chrome>",
+         "url": "<URL if opening a website or web search>",
+         "query": "<Song title or search query>",
+         "key": "<play_pause | next_track | prev_track | volume_up | volume_down>",
+         "name": "<Display name of app/action>"
+       }
+     * USER ENVIRONMENT CONTEXT:
+       - Browsers Installed:
+         * Brave: "brave.exe" (Profiles: "Default" = Work, "Profile 1" = Personal, "Profile 2" = Student).
+         * Comet (Perplexity AI Browser): "comet.exe" (Profile: "Default" = Subhash).
+         * Google Chrome: "chrome.exe" (Profiles: "Profile 2" = Student ks25mmb0a35@student.nitw.ac.in, "Profile 5" = Work, "Default" = Personal).
+         * Microsoft Edge: "msedge.exe".
+       - Installed Desktop Apps (ALWAYS launch local app if installed, NEVER open web URL!):
+         * ChatGPT Desktop App: "shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App" (ChatGPT IS INSTALLED — ALWAYS launch native desktop app!).
+         * Claude Desktop App: "shell:AppsFolder\\Claude_pzs8sxrjxfjjc!Claude" (Claude IS INSTALLED — NEVER open web URL!).
+         * Apple Music: type="apple_app", name="Apple Music", protocol="music:".
+         * Apple TV: type="apple_app", name="Apple TV", protocol="videos:".
+         * Antigravity IDE: "C:\\Users\\srira\\AppData\\Local\\Programs\\Antigravity IDE\\Antigravity IDE.exe".
+         * Antigravity Runner: "C:\\Users\\srira\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe".
+         * Spotify: "spotify:" (URI) / Spotify desktop app.
+         * VLC Media Player: "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe".
+         * CapCut, Notion, Perplexity Desktop, LM Studio, Kimi, AutoCAD 2026, Cinema 4D, Visual Studio Code.
+       - Playing Songs / Videos:
+         * In Brave: type="youtube_play_browser", browser="brave", query="<song>"
+         * In Comet: type="youtube_play_browser", browser="comet", query="<song>"
+         * In Spotify: type="spotify_play", query="<song>"
+         * In Apple Music: type="apple_music_play", query="<song>"
+         * General: type="youtube_play", query="<song>"
+       - Searching:
+         * In Brave: type="open_in_browser", browser="brave", url="https://search.brave.com/search?q=..."
+         * In Comet: type="open_in_browser", browser="comet", url="https://www.perplexity.ai/search?q=..."
+       - Profiles:
+         * In Brave with Student/Work: type="browser_profile" or "browser_profile_url" with browser="brave", profileDir="Default" (Work) or "Profile 2" (Student).
+         * In Chrome with Student/Work: type="browser_profile" or "browser_profile_url" with browser="chrome", profileDir="Profile 2" (Student) or "Profile 5" (Work).
+     * "steps": []
+     * "found": true
+
 MULTI-STEP WORKFLOW & HIDDEN TARGET GUIDANCE:
 1. When the user asks to locate, configure, or use something that is HIDDEN or requires multiple actions (e.g. nested menus, dialogs, submenus, settings pages, tabs, or Windows taskbar/Start):
    - Do NOT set "found": false!
@@ -98,11 +143,16 @@ COORDINATE SYSTEM (NORMALIZED 0 TO 1000):
 
 OUTPUT FORMAT (JSON only, no markdown, no code fences):
 {
-  "mode": "pointer" | "assistant",
+  "mode": "pointer" | "assistant" | "action",
   "found": true,
   "reply": "Spoken voice reply for Google Cloud TTS.",
   "detailed_explanation": "Concise formatted markdown explanation.",
   "reply_lang": "${language}",
+  "action": {
+    "type": "launch_app" | "open_url" | "open_folder" | "system_uri",
+    "target": "notepad.exe",
+    "name": "Notepad"
+  },
   "multi_step": false,
   "is_final_step": true,
   "step_index": 1,
@@ -411,19 +461,21 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
     const overlayH = displayInfo.height || 1080;
     const scaleFactor = displayInfo.scaleFactor || 1;
 
-    const isAssistantMode = result.mode === 'assistant' ||
-      (!result.mode && result.detailed_explanation && result.detailed_explanation.length > 120);
+    const isActionMode = result.mode === 'action' || !!result.action;
+    const isAssistantMode = !isActionMode && (result.mode === 'assistant' ||
+      (!result.mode && result.detailed_explanation && result.detailed_explanation.length > 120));
 
     const isFinalStep = result.is_final_step !== undefined ? !!result.is_final_step : (!result.multi_step);
 
     const normalized = {
-      mode: isAssistantMode ? 'assistant' : 'pointer',
-      found: isAssistantMode ? true : (result.found !== false),
+      mode: isActionMode ? 'action' : (isAssistantMode ? 'assistant' : 'pointer'),
+      action: result.action || null,
+      found: isActionMode ? true : (isAssistantMode ? true : (result.found !== false)),
       reply: result.reply || result.detailed_explanation || '',
       detailed_explanation: result.detailed_explanation || result.reply || '',
       reply_lang: result.reply_lang || language,
-      multi_step: !isFinalStep && !!result.multi_step,
-      is_final_step: isFinalStep,
+      multi_step: !isActionMode && !isFinalStep && !!result.multi_step,
+      is_final_step: isActionMode ? true : isFinalStep,
       step_index: result.step_index || 1,
       total_steps: result.total_steps || 1,
       goal: result.goal || '',

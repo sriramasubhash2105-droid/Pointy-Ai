@@ -1624,6 +1624,9 @@ function handlePointAt(result, audioBase64 = null, conversation = null, question
     currentSteps = [];
     currentStepIndex = 0;
     setAppState('pointing');
+    if (result.mode === 'action') {
+      spawnParticles(currentCursorPos.x, currentCursorPos.y, 20);
+    }
     if (audioBase64) {
       playAudioBase64(audioBase64, isChatModeActive);
     }
