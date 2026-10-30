@@ -787,7 +787,7 @@
       "id": "conv_1792921748189_a6cmm",
       "title": "what's on the screen",
       "createdAt": 1792921748189,
-      "updatedAt": 1793297965368,
+      "updatedAt": 1793338878872,
       "messages": [
         {
           "id": "msg_1792922620620_mxjl",
@@ -3647,6 +3647,288 @@
           "steps": [],
           "found": true,
           "timestamp": 1793297965368
+        },
+        {
+          "id": "msg_1793298295743_mzg4",
+          "role": "user",
+          "text": "play poker face song",
+          "timestamp": 1793298295743
+        },
+        {
+          "id": "msg_1793298295746_q6m5",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Playing poker face song on YouTube for you!",
+          "detailed_explanation": "Executed desktop action: **YouTube: \"poker face song\"** (youtube_play)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793298295746
+        },
+        {
+          "id": "msg_1793298359460_ca1q",
+          "role": "user",
+          "text": "hey",
+          "timestamp": 1793298359460
+        },
+        {
+          "id": "msg_1793298361745_j11a",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "Hello! I'm Pointy, your desktop companion. How can I help you with your apps or screen today?",
+          "detailed_explanation": "I am Pointy, your spatial AI assistant. I can help you find elements on your screen, launch applications like Apple TV or Spotify, and perform actions across your desktop environment.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793298361746
+        },
+        {
+          "id": "msg_1793298378811_585o",
+          "role": "user",
+          "text": "hello",
+          "timestamp": 1793298378811
+        },
+        {
+          "id": "msg_1793298381061_724x",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "Hello! I'm Pointy, your desktop companion. How can I help you with your apps or screen today?",
+          "detailed_explanation": "I am Pointy, your spatial AI assistant. I can help you find elements on your screen, launch applications, or explain what's currently visible on your desktop.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793298381061
+        },
+        {
+          "id": "msg_1793298404300_9kra",
+          "role": "user",
+          "text": "hello",
+          "timestamp": 1793298404300
+        },
+        {
+          "id": "msg_1793298407276_s8bg",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "Hello! I'm Pointy. I see your desktop with a cool samurai wallpaper. How can I help you today?",
+          "detailed_explanation": "Hello! I'm Pointy, your spatial AI companion. I'm currently looking at your Windows desktop, which features a striking anime-style wallpaper of a samurai facing a dark dragon. \n\nI can help you launch apps like **Brave**, **Spotify**, or **Apple Music** from your taskbar, find specific files, or explain what's on your screen. Just let me know what you need!",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793298407276
+        },
+        {
+          "id": "msg_1793298435249_iqzt",
+          "role": "user",
+          "text": "heyy",
+          "timestamp": 1793298435249
+        },
+        {
+          "id": "msg_1793298438014_xx1u",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "Hey there! I'm Pointy. I see your awesome samurai wallpaper. How can I help you navigate your desktop today?",
+          "detailed_explanation": "I am ready to assist you with your desktop. I can see your taskbar with various apps like Brave, Spotify, and ChatGPT, and your beautiful dark fantasy wallpaper.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793298438014
+        },
+        {
+          "id": "msg_1793298457154_uvpn",
+          "role": "user",
+          "text": "where is start icon",
+          "timestamp": 1793298457154
+        },
+        {
+          "id": "msg_1793298459395_c91c",
+          "role": "assistant",
+          "mode": "pointer",
+          "reply": "The Start icon is right here in the center of your taskbar.",
+          "detailed_explanation": "The Windows Start button is located in the center section of your taskbar at the bottom of the screen.",
+          "steps": [
+            {
+              "x": 263,
+              "y": 917,
+              "w": 29,
+              "h": 33,
+              "label": "Start Icon",
+              "instruction": "Click here to open the Start menu.",
+              "element_id": null
+            }
+          ],
+          "found": true,
+          "timestamp": 1793298459395
+        },
+        {
+          "id": "msg_1793299899854_tb56",
+          "role": "user",
+          "text": "open apple music",
+          "timestamp": 1793299899854
+        },
+        {
+          "id": "msg_1793299899858_x54a",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Opening Apple Music for you!",
+          "detailed_explanation": "Executed desktop action: **Apple Music** (apple_app)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793299899858
+        },
+        {
+          "id": "msg_1793299916945_949h",
+          "role": "user",
+          "text": "heyy",
+          "timestamp": 1793299916945
+        },
+        {
+          "id": "msg_1793299919349_k90n",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "Hey there! I'm Pointy, your desktop companion. How can I help you with your screen today?",
+          "detailed_explanation": "I am ready to assist you with your desktop. I can help you find files, launch apps like Apple Music or Brave, or explain what's currently on your screen.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793299919349
+        },
+        {
+          "id": "msg_1793299938085_8bke",
+          "role": "user",
+          "text": "play poker face song",
+          "timestamp": 1793299938085
+        },
+        {
+          "id": "msg_1793299938088_joha",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Playing poker face song on YouTube for you!",
+          "detailed_explanation": "Executed desktop action: **YouTube: \"poker face song\"** (youtube_play)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793299938088
+        },
+        {
+          "id": "msg_1793301334298_dp4q",
+          "role": "user",
+          "text": "play poker face song",
+          "timestamp": 1793301334298
+        },
+        {
+          "id": "msg_1793301334300_hf90",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Playing poker face song on YouTube for you!",
+          "detailed_explanation": "Executed desktop action: **YouTube: \"poker face song\"** (youtube_play)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793301334300
+        },
+        {
+          "id": "msg_1793301663113_2ky7",
+          "role": "user",
+          "text": "play poker face song",
+          "timestamp": 1793301663113
+        },
+        {
+          "id": "msg_1793301663115_rgsq",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Playing poker face song on YouTube for you!",
+          "detailed_explanation": "Executed desktop action: **YouTube: \"poker face song\"** (youtube_play)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793301663115
+        },
+        {
+          "id": "msg_1793301681410_zi4t",
+          "role": "user",
+          "text": "hey",
+          "timestamp": 1793301681410
+        },
+        {
+          "id": "msg_1793301683893_z9ut",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "Hello! I'm Pointy, your desktop companion. How can I help you today?",
+          "detailed_explanation": "I am Pointy, your spatial AI assistant. I can help you find things on your screen, open apps, or play music. Just let me know what you need!",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793301683893
+        },
+        {
+          "id": "msg_1793301716835_kv45",
+          "role": "user",
+          "text": "open apple music",
+          "timestamp": 1793301716835
+        },
+        {
+          "id": "msg_1793301716838_6y0y",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Opening Apple Music for you!",
+          "detailed_explanation": "Executed desktop action: **Apple Music** (apple_app)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793301716838
+        },
+        {
+          "id": "msg_1793303858878_3xjq",
+          "role": "user",
+          "text": "open notepad",
+          "timestamp": 1793303858878
+        },
+        {
+          "id": "msg_1793303858882_3m6v",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Opening Notepad for you!",
+          "detailed_explanation": "Executed desktop action: **Notepad** (launch_app)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793303858882
+        },
+        {
+          "id": "msg_1793304019322_1hi8",
+          "role": "user",
+          "text": "open chatgpt and write a prompt on image generation of ai influencer",
+          "timestamp": 1793304019322
+        },
+        {
+          "id": "msg_1793304019325_25a3",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Opening ChatGPT and writing your prompt!",
+          "detailed_explanation": "Executed desktop action: **ChatGPT: \"Write a comprehensive, insightfu...\"** (open_and_type)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793304019325
+        },
+        {
+          "id": "msg_1793335599373_a5ln",
+          "role": "user",
+          "text": "open notepad",
+          "timestamp": 1793335599373
+        },
+        {
+          "id": "msg_1793335599377_up2n",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Opening Notepad for you!",
+          "detailed_explanation": "Executed desktop action: **Notepad** (launch_app)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793335599377
+        },
+        {
+          "id": "msg_1793338878871_9fui",
+          "role": "user",
+          "text": "paste the dictated text in the notepad",
+          "timestamp": 1793338878871
+        },
+        {
+          "id": "msg_1793338878872_u3ja",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Opening Notepad for you!",
+          "detailed_explanation": "Executed desktop action: **Notepad** (launch_app)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1793338878872
         }
       ]
     }

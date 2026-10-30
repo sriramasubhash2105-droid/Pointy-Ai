@@ -56,7 +56,10 @@ const textInput = document.getElementById('text-input');
 const textSubmit = document.getElementById('text-submit');
 
 const btnQuickVoice = document.getElementById('btn-quick-voice');
+const btnQuickDictate = document.getElementById('btn-quick-dictate');
 const btnQuickType = document.getElementById('btn-quick-type');
+const dictationCard = document.getElementById('dictation-card');
+const dictationStatusText = document.getElementById('dictation-status-text');
 
 const particlesContainer = document.getElementById('particles');
 
@@ -195,6 +198,15 @@ function setupIPCListeners() {
     resetToStandby();
   });
 
+  // Voice Dictation events
+  window.pointyAPI.onStartDictation?.((pos) => {
+    showDictationPill(pos);
+  });
+
+  window.pointyAPI.onDictationResult?.((data) => {
+    showDictationResult(data);
+  });
+
   // Multi-step guidance events
   window.pointyAPI.onMultiStepWaiting?.((data) => {
     console.log('[Overlay] Multi-step waiting for user click:', data);
@@ -277,6 +289,19 @@ function setupEventListeners() {
   btnQuickVoice?.addEventListener('click', (e) => {
     e.stopPropagation();
     window.pointyAPI.triggerVoiceSummon();
+  });
+
+  btnQuickDictate?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    window.pointyAPI.triggerDictation();
+  });
+
+  dictationCard?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (currentState === 'dictating') {
+      console.log('[Overlay] 🖱️ User clicked dictation card to finish speaking');
+      stopVoiceSession();
+    }
   });
 
   btnQuickType?.addEventListener('click', (e) => {
@@ -517,10 +542,10 @@ function setAppState(state) {
     cancelStandbyGlide();
   }
   currentState = state;
-  aiCursor.classList.remove('listening', 'thinking', 'pointing');
+  aiCursor.classList.remove('listening', 'thinking', 'pointing', 'dictating');
   if (state !== 'idle') {
     aiCursor.classList.remove('idle');
-    aiCursor.classList.add(state);
+    aiCursor.classList.add(state === 'dictating' ? 'listening' : state);
   }
 
   // When state is 'thinking': red cursor graphic is replaced by the loading spinner
@@ -529,6 +554,54 @@ function setAppState(state) {
   } else {
     cursorLoadingSpinner?.classList.add('hidden');
   }
+
+  if (state === 'transcribing_dictation') {
+    if (dictationStatusText) {
+      dictationStatusText.textContent = '⚡ Transcribing & typing into active window...';
+    }
+  }
+
+  if (state === 'idle') {
+    dictationCard?.classList.add('hidden');
+  }
+}
+
+// ─── Voice Dictation UI ──────────────────────────────────────────────
+function showDictationPill(pos) {
+  if (!dictationCard) return;
+  const x = pos?.x || currentCursorPos.x || window.innerWidth / 2;
+  const y = pos?.y || currentCursorPos.y || window.innerHeight / 2;
+
+  // Position nicely floating beside cursor
+  let cardX = x + 24;
+  let cardY = y + 20;
+  if (cardX + 340 > window.innerWidth) cardX = Math.max(10, x - 350);
+  if (cardY + 70 > window.innerHeight) cardY = Math.max(10, y - 80);
+
+  dictationCard.style.left = cardX + 'px';
+  dictationCard.style.top = cardY + 'px';
+  if (dictationStatusText) {
+    dictationStatusText.textContent = 'Dictating... Speak clearly';
+  }
+  dictationCard.classList.remove('hidden');
+}
+
+function showDictationResult(data) {
+  if (!dictationCard) return;
+  if (data && data.success) {
+    if (dictationStatusText) {
+      dictationStatusText.textContent = `✍️ Typed: "${data.text.slice(0, 32)}${data.text.length > 32 ? '...' : ''}"`;
+    }
+    spawnParticles(currentCursorPos.x, currentCursorPos.y, 16);
+  } else {
+    if (dictationStatusText) {
+      dictationStatusText.textContent = `⚠️ ${data?.text || 'No speech detected'}`;
+    }
+  }
+
+  setTimeout(() => {
+    dictationCard.classList.add('hidden');
+  }, 2200);
 }
 
 // ─── Voice Capture & Recognition ─────────────────────────────────────
@@ -552,9 +625,21 @@ function setupSpeechRecognition() {
         }
       }
 
-      // Keep screen completely clear while user is speaking (no text window)
+      // Live visual feedback during voice dictation
+      if (currentState === 'dictating') {
+        const fullSoFar = (finalTranscript + ' ' + interimTranscript).trim();
+        if (dictationStatusText && fullSoFar) {
+          dictationStatusText.textContent = `🎙️ "${fullSoFar.slice(-36)}"`;
+        }
+        // Natural 1400ms pause timer for dictation
+        if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
+        speechSilenceTimer = setTimeout(() => {
+          stopVoiceSession();
+        }, 1400);
+        return;
+      }
 
-      // Auto-silence timer
+      // Auto-silence timer for voice questions
       if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
       speechSilenceTimer = setTimeout(() => {
         stopVoiceSession();
@@ -566,7 +651,13 @@ function setupSpeechRecognition() {
     };
 
     speechRecognizer.onend = () => {
-      if (currentState === 'listening' && finalTranscript) {
+      if (currentState === 'dictating') {
+        const text = (finalTranscript || '').trim();
+        if (text) {
+          console.log('[Pointy] ⚡ Submitting live dictation text on speech end:', text);
+          submitDictationText(text);
+        }
+      } else if (currentState === 'listening' && finalTranscript) {
         submitVoiceQuestion(finalTranscript);
       }
     };
@@ -609,8 +700,8 @@ async function startVoiceSession() {
         mediaStream = null;
       }
 
-      // If text transcription already submitted, skip sending raw audio
-      if (finalTranscript) return;
+      // If text transcription was already submitted via live Web Speech, skip sending raw audio
+      if (finalTranscript && finalTranscript.trim()) return;
 
       if (audioChunks.length === 0) return;
       const blob = new Blob(audioChunks, { type: 'audio/webm' });
@@ -638,7 +729,7 @@ async function startVoiceSession() {
       const sessionStart = Date.now();
 
       vadInterval = setInterval(() => {
-        if (!vadAnalyser || currentState !== 'listening') return;
+        if (!vadAnalyser || (currentState !== 'listening' && currentState !== 'dictating')) return;
 
         vadAnalyser.getByteFrequencyData(dataArray);
         let sum = 0;
@@ -646,6 +737,19 @@ async function startVoiceSession() {
           sum += dataArray[i];
         }
         const avg = sum / dataArray.length;
+
+        const isDictating = currentState === 'dictating';
+        const silenceThreshold = isDictating ? 1400 : 1300;
+        const maxSessionDuration = isDictating ? 60000 : 8000;
+
+        // Visual indicator of microphone audio presence during dictation
+        if (isDictating && dictationCard) {
+          if (avg > 12) {
+            dictationCard.classList.add('audio-active');
+          } else {
+            dictationCard.classList.remove('audio-active');
+          }
+        }
 
         // Threshold: voice speech usually produces avg > 11
         if (avg > 11) {
@@ -657,12 +761,12 @@ async function startVoiceSession() {
         } else if (speechDetected) {
           if (!silenceStartTime) {
             silenceStartTime = Date.now();
-          } else if (Date.now() - silenceStartTime > 1300) {
-            console.log('[Pointy VAD] ⏹️ 1.3s silence after speech. Auto-submitting...');
+          } else if (Date.now() - silenceStartTime > silenceThreshold) {
+            console.log(`[Pointy VAD] ⏹️ ${silenceThreshold}ms silence after speech. Auto-submitting...`);
             stopVoiceSession();
           }
-        } else if (Date.now() - sessionStart > 7500) {
-          console.log('[Pointy VAD] ⏹️ 7.5s elapsed without speech. Submitting...');
+        } else if (Date.now() - sessionStart > maxSessionDuration) {
+          console.log(`[Pointy VAD] ⏹️ ${maxSessionDuration}ms elapsed. Submitting...`);
           stopVoiceSession();
         }
       }, 50);
@@ -697,11 +801,28 @@ function stopVoiceSession() {
     mediaRecorder.stop();
   }
 
-  if (finalTranscript) {
-    submitVoiceQuestion(finalTranscript);
+  const liveText = (finalTranscript || '').trim();
+
+  if (currentState === 'dictating') {
+    if (liveText) {
+      submitDictationText(liveText);
+    } else {
+      setAppState('transcribing_dictation');
+    }
+    return;
+  }
+
+  if (liveText) {
+    submitVoiceQuestion(liveText);
   } else {
     setAppState('thinking');
   }
+}
+
+function submitDictationText(text) {
+  setAppState('transcribing_dictation');
+  finalTranscript = '';
+  window.pointyAPI.sendDictationText?.(text);
 }
 
 function submitVoiceQuestion(text) {
@@ -1676,7 +1797,7 @@ function pointToStep(index, fullText = null, audioBase64 = null, isChat = false,
 
   setAppState('pointing');
 
-  // 2. Play Google Cloud TTS speech as cursor points!
+  // 2. Play TTS speech as cursor points!
   if (audioBase64) {
     playAudioBase64(audioBase64, isChat);
   } else {
@@ -1727,11 +1848,16 @@ function repositionAnswerCard() {
   positionBubbleAtCursor();
 }
 
-// ─── Google Cloud TTS Audio Playback (High-fidelity voice) ───────────
+// ─── Browser SpeechSynthesis Client-Side Fallback (Disabled) ─────────
+function speakWithBrowserSynthesis(text, isChat = false) {
+  // Windows TTS disabled per user preference
+  return;
+}
+
+// ─── EasyVoice Kokoro-82M AI Audio Playback ──────────────────────────
 function playAudioBase64(base64, isChat = false) {
   if (!base64) return;
   try {
-
     if (activeAudio) {
       activeAudio.pause();
       activeAudio = null;
@@ -1742,7 +1868,10 @@ function playAudioBase64(base64, isChat = false) {
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
     }
-    const blob = new Blob([bytes], { type: 'audio/mp3' });
+    // Auto-detect WAV container (RIFF) or default to MP3
+    const isWav = bytes.length > 4 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46;
+    const mimeType = isWav ? 'audio/wav' : 'audio/mp3';
+    const blob = new Blob([bytes], { type: mimeType });
     const url = URL.createObjectURL(blob);
     activeAudio = new Audio(url);
 
@@ -1764,7 +1893,9 @@ function playAudioBase64(base64, isChat = false) {
       }
     };
 
-    activeAudio.play().catch((e) => console.warn('[Pointy] Audio play failed:', e));
+    activeAudio.play().catch((e) => {
+      console.warn('[Pointy] Audio play notice:', e);
+    });
   } catch (error) {
     console.warn('[Pointy] Base64 audio playback error:', error);
   }

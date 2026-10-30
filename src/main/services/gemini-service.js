@@ -66,7 +66,11 @@ CONVERSATIONAL MEMORY & ASSISTANT INTELLIGENCE:
      * "reply": Concise spoken announcement (under 12 words), e.g. "Opening Comet!", "Opening Brave!", "Opening Antigravity IDE!", "Playing Honeypie in Brave!"
      * "detailed_explanation": "Executed action: [Name]."
      * "action": {
-         "type": "launch_app" | "windows_app_id" | "open_in_browser" | "browser_profile" | "browser_profile_url" | "youtube_play_browser" | "spotify_play" | "apple_music_play" | "youtube_play" | "media_key" | "open_url" | "open_folder" | "system_uri",
+         "type": "open_and_type" | "type_text" | "launch_app" | "windows_app_id" | "open_in_browser" | "browser_profile" | "browser_profile_url" | "youtube_play_browser" | "spotify_play" | "apple_music_play" | "youtube_play" | "media_key" | "open_url" | "open_folder" | "system_uri",
+         "app": "<claude | chatgpt | notepad | word | code | etc.>",
+         "prompt": "<Formulated prompt to write into the target app>",
+         "text": "<Text to type into active window>",
+         "pressEnter": false,
          "target": "<target path or app identifier>",
          "browser": "<brave | comet | chrome | edge>",
          "profileDir": "<Profile directory: e.g. Profile 2 for student, Default for work in Brave, Profile 5 for work in Chrome>",
@@ -76,6 +80,18 @@ CONVERSATIONAL MEMORY & ASSISTANT INTELLIGENCE:
          "name": "<Display name of app/action>"
        }
      * USER ENVIRONMENT CONTEXT:
+       - Autonomous App Prompt Writing & Typing:
+         * e.g. "open claude and write a prompt about quantum computing", "open claude and write a prompt in the claude about something", "open claude and ask it how photosynthesis works", "open chatgpt and write a prompt about machine learning", "open notepad and type shopping list: milk, eggs, bread":
+           - "type": "open_and_type"
+           - "app": "claude" (or "chatgpt", "notepad", "code", etc.)
+           - "prompt": Craft a well-structured, insightful prompt based on the user's topic (e.g. "Write a comprehensive, insightful guide about quantum computing. Explain the fundamental concepts, key principles, and 3 practical real-world applications in simple, engaging terms.")
+           - "reply": "Opening Claude and writing your prompt!"
+           - "pressEnter": false
+       - Direct Dictation & Typing into Active Window:
+         * e.g. "type this: hello everyone", "dictate please review my document", "type into active window: hello":
+           - "type": "type_text"
+           - "text": "<text to type>"
+           - "reply": "Typing into your active window!"
        - Browsers Installed:
          * Brave: "brave.exe" (Profiles: "Default" = Work, "Profile 1" = Personal, "Profile 2" = Student).
          * Comet (Perplexity AI Browser): "comet.exe" (Profile: "Default" = Subhash).
@@ -590,6 +606,95 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
         throw new Error(err.message || 'Gemini error');
       }
     }
+  }
+
+  /**
+   * Ultra-fast audio transcription using Gemini 3.5 Flash.
+   * Transcribes raw audio buffer (WAV or WebM) in ~2s with direct inline base64 data.
+   *
+   * @param {Buffer} audioBuffer
+   * @returns {Promise<{ transcript: string, language: string }>}
+   */
+  async transcribeAudio(audioBuffer) {
+    if (!this.ai) {
+      throw new Error('Gemini API key not configured');
+    }
+    if (!audioBuffer || audioBuffer.length < 1000) {
+      return { transcript: '', language: 'en-US' };
+    }
+
+    let mimeType = 'audio/webm';
+    if (audioBuffer.length >= 4 && audioBuffer.toString('utf8', 0, 4) === 'RIFF') {
+      mimeType = 'audio/wav';
+    }
+
+    const base64Audio = audioBuffer.toString('base64');
+    const primaryModel = 'gemini-3.5-flash';
+    const fallbackModel = 'gemini-3-flash-preview';
+
+    const promptText = 'You are a high-accuracy speech-to-text engine. Transcribe the spoken words in this audio verbatim with correct punctuation and capitalization. Output ONLY the words spoken. If the audio is silent or contains no intelligible words, output nothing. Do NOT output timestamps, time codes (like 00:00 or 0:00), subtitle markers, or explanations.';
+
+    const contents = [
+      {
+        role: 'user',
+        parts: [
+          {
+            inlineData: {
+              data: base64Audio,
+              mimeType,
+            },
+          },
+          {
+            text: promptText,
+          },
+        ],
+      },
+    ];
+
+    try {
+      const res = await this.ai.models.generateContent({
+        model: primaryModel,
+        contents,
+      });
+      const transcript = this._sanitizeTranscript(res.text || '');
+      return { transcript, language: 'en-US' };
+    } catch (err) {
+      console.warn(`[GeminiService] STT with ${primaryModel} failed (${err.message}), falling back to ${fallbackModel}...`);
+      try {
+        const res2 = await this.ai.models.generateContent({
+          model: fallbackModel,
+          contents,
+        });
+        const transcript = this._sanitizeTranscript(res2.text || '');
+        return { transcript, language: 'en-US' };
+      } catch (err2) {
+        throw new Error(`Gemini audio transcription error: ${err2.message}`);
+      }
+    }
+  }
+
+  _sanitizeTranscript(raw) {
+    if (!raw) return '';
+    let text = raw.trim();
+    text = text.replace(/^```[a-z]*\n([\s\S]*?)```$/i, '$1').trim();
+    text = text.replace(/\[?\b\d{1,2}:\d{2}\b\]?/g, '').trim();
+    if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+      text = text.slice(1, -1).trim();
+    }
+    const lower = text.toLowerCase();
+    if (
+      !text ||
+      text === '.' ||
+      text === '...' ||
+      lower === 'the sky is blue' ||
+      lower === 'you' ||
+      lower === 'thank you' ||
+      lower === 'piss off' ||
+      /^[0-9:\s.]+$/.test(text)
+    ) {
+      return '';
+    }
+    return text;
   }
 }
 

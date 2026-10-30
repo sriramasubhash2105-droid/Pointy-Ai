@@ -45,6 +45,7 @@ const { GnaniService } = require('./services/gnani-service');
 const { GeminiService } = require('./services/gemini-service');
 const { AssemblyAIService } = require('./services/assemblyai-service');
 const { GoogleTTSService } = require('./services/google-tts-service');
+const { EasyVoiceTTSService } = require('./services/easyvoice-tts-service');
 const { ConversationManager } = require('./services/conversation-manager');
 const { MouseWatcherService } = require('./services/mouse-watcher-service');
 const { ActionService } = require('./services/action-service');
@@ -88,6 +89,7 @@ const CONFIG = {
   gnaniApiKey: process.env.GNANI_API_KEY || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3-flash-preview',
+  easyVoiceApiKey: process.env.EASYVOICE_API_KEY || '',
   googleTtsApiKey: process.env.GOOGLE_TTS_API_KEY || process.env.GEMINI_API_KEY || '',
 };
 
@@ -226,6 +228,10 @@ function createTray() {
       click: () => handleHotkeyPress(),
     },
     {
+      label: '✍️ Voice Dictate to Active Window (Alt + D)',
+      click: () => handleDictationToggle(),
+    },
+    {
       label: '⌨️ Type a Question on Screen (Alt + T)',
       click: () => overlayWindow?.webContents.send('toggle-text-input'),
     },
@@ -333,6 +339,16 @@ function registerHotkeys() {
   } catch (e) {
     console.warn('[Pointy] Notice: Alt+T registration:', e.message);
   }
+
+  try {
+    globalShortcut.register('Alt+D', () => {
+      console.log('[Pointy] 🎙️ Alt+D triggered -> Dictation toggle');
+      handleDictationToggle();
+    });
+    console.log('[Pointy] ✅ Registered hotkey: Alt+D (Voice Dictation to Active Window)');
+  } catch (e) {
+    console.warn('[Pointy] Notice: Alt+D registration:', e.message);
+  }
 }
 
 // ─── Real-time Cursor Tracking (Follows cursor continuously when not pointing) ──
@@ -392,6 +408,110 @@ async function handleHotkeyPress() {
   startMouseTracking();
   overlayWindow?.webContents.send('state-change', 'listening');
   overlayWindow?.webContents.send('start-recording');
+}
+
+// ─── Voice Dictation Engine (Talk and Pointy Types into Active Window) ───
+async function handleDictationToggle() {
+  if (appState === 'dictating') {
+    console.log('[Pointy] ⏹️ Stopping dictation -> Transcribing...');
+    appState = 'transcribing_dictation';
+    overlayWindow?.webContents.send('state-change', 'transcribing_dictation');
+    overlayWindow?.webContents.send('stop-recording');
+    return;
+  }
+
+  if (appState !== 'idle') {
+    resetState();
+    return;
+  }
+
+  const cursorPoint = screen.getCursorScreenPoint();
+  console.log(`[Pointy] 🎙️ Starting Voice Dictation at (${cursorPoint.x}, ${cursorPoint.y})`);
+
+  appState = 'dictating';
+  startMouseTracking();
+  overlayWindow?.webContents.send('start-dictation', cursorPoint);
+  overlayWindow?.webContents.send('state-change', 'dictating');
+  overlayWindow?.webContents.send('start-recording');
+}
+
+// Process voice dictation audio or instant transcript and type directly into the user's active window
+async function processDictation(input) {
+  const startTime = Date.now();
+  try {
+    appState = 'transcribing_dictation';
+    overlayWindow?.webContents.send('state-change', 'transcribing_dictation');
+
+    let transcript = '';
+
+    if (typeof input === 'string') {
+      // ⚡ Path 1: Instant client-side Web Speech API transcript (0ms network STT latency!)
+      transcript = input.trim();
+      logToFile(`⚡ Dictation: Instant transcript received from Web Speech: "${transcript}"`);
+    } else if (Buffer.isBuffer(input)) {
+      // ⚡ Path 2: Audio buffer fallback (~1.5s via Gemini 3.5 Flash Lite)
+      logToFile(`🎙️ Dictation: Transcribing voice buffer (${input.length} bytes)...`);
+
+      // Try Gemini 3.5 Flash STT (~2s)
+      if (geminiService && geminiService.hasApiKey()) {
+        try {
+          const res = await geminiService.transcribeAudio(input);
+          const cand = (res?.transcript || '').trim();
+          if (cand && !/^(\d{1,2}:)?\d{1,2}(:\d{2})?$/.test(cand) && !/^[0-9:\s.]+$/.test(cand)) {
+            transcript = cand;
+            logToFile(`⚡ Dictation transcribed via Gemini in ${Date.now() - startTime}ms: "${transcript}"`);
+          } else {
+            logToFile(`⚠️ Gemini returned timestamp or empty ("${cand}"), falling back to AssemblyAI (universal-2)...`);
+          }
+        } catch (gemErr) {
+          logToFile(`⚠️ Gemini STT failed (${gemErr.message}), falling back to AssemblyAI/Gnani...`);
+        }
+      }
+
+      // Fallback to AssemblyAI (universal-2) if Gemini was empty, timestamped, or errored
+      if (!transcript) {
+        if (assemblyaiService && assemblyaiService.hasApiKey()) {
+          logToFile('🎙️ Dictation: Transcribing with AssemblyAI (universal-2)...');
+          const res = await assemblyaiService.transcribe(input);
+          transcript = (res?.transcript || '').trim();
+          logToFile(`🎯 Dictation transcribed via AssemblyAI in ${Date.now() - startTime}ms: "${transcript}"`);
+        } else if (gnaniService && gnaniService.hasApiKey()) {
+          logToFile('🎙️ Dictation: Transcribing with Gnani fallback...');
+          const res = await gnaniService.transcribe(input);
+          transcript = (res?.transcript || '').trim();
+        }
+      }
+    }
+
+    transcript = transcript.trim();
+    if (!transcript) {
+      logToFile('⚠️ Dictation: No speech detected');
+      overlayWindow?.webContents.send('dictation-result', { success: false, text: "No speech detected" });
+      setTimeout(() => {
+        if (appState === 'transcribing_dictation') resetState();
+      }, 1500);
+      return;
+    }
+
+    logToFile(`✍️ Dictation ready in ${Date.now() - startTime}ms: "${transcript}" -> Typing into active window!`);
+    overlayWindow?.webContents.send('dictation-result', { success: true, text: transcript });
+
+    // Type the transcribed text directly into the user's active window!
+    await actionService?.typeTextIntoActiveWindow(transcript, false);
+
+    setTimeout(() => {
+      if (appState === 'transcribing_dictation') {
+        resetState();
+      }
+    }, 1600);
+
+  } catch (err) {
+    logToFile(`❌ Dictation error: ${err.message}`);
+    overlayWindow?.webContents.send('dictation-result', { success: false, text: err.message });
+    setTimeout(() => {
+      if (appState === 'transcribing_dictation') resetState();
+    }, 1600);
+  }
 }
 
 // ─── Screen Capture Engine (Hardware Accelerated with Fallback) ───────
@@ -500,7 +620,7 @@ async function executeDesktopAction(action, question, language = 'en-US') {
   chatAppWindow?.webContents.send('conversation-updated', { conversation: activeConv });
 
   // 5. Synthesize speech concurrently in background and play as soon as ready!
-  if (googleTtsService && googleTtsService.hasApiKey()) {
+  if (googleTtsService) {
     googleTtsService.speak(replyText, language).then((audioBase64) => {
       if (audioBase64 && appState === 'pointing') {
         overlayWindow?.webContents.send('play-audio', audioBase64);
@@ -521,6 +641,15 @@ async function processQuestion(audioBuffer) {
     const [screenshotBuffer, sttResult] = await Promise.all([
       captureScreenBuffer(),
       (async () => {
+        if (geminiService && geminiService.hasApiKey()) {
+          try {
+            logToFile(`🎙️ Transcribing audio (${audioBuffer?.length || 0} bytes) with Gemini 3.5 Flash Lite...`);
+            const gRes = await geminiService.transcribeAudio(audioBuffer);
+            if (gRes && gRes.transcript) return gRes;
+          } catch (gErr) {
+            logToFile(`⚠️ Gemini STT query fallback: ${gErr.message}`);
+          }
+        }
         if (assemblyaiService && assemblyaiService.hasApiKey()) {
           logToFile(`🎙️ Transcribing audio (${audioBuffer?.length || 0} bytes) with AssemblyAI...`);
           return await assemblyaiService.transcribe(audioBuffer);
@@ -823,13 +952,13 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
   const spokenSentence = googleTtsService ? googleTtsService.extractFirstSentence(result.reply) : result.reply;
 
   let audioBase64 = null;
-  if (spokenSentence && googleTtsService && googleTtsService.hasApiKey()) {
-    logToFile(`🔊 Synthesizing speech with Google Cloud TTS: "${spokenSentence.slice(0, 45)}..."`);
+  if (spokenSentence && googleTtsService) {
+    logToFile(`🔊 Synthesizing speech: "${spokenSentence.slice(0, 45)}..."`);
     try {
       audioBase64 = await googleTtsService.speak(spokenSentence, result.reply_lang || language);
       logToFile(`🔊 TTS synthesis complete (${audioBase64 ? audioBase64.length : 0} bytes base64)`);
     } catch (ttsErr) {
-      logToFile(`⚠️ Google Cloud TTS error: ${ttsErr.message}`);
+      logToFile(`⚠️ TTS error: ${ttsErr.message}`);
     }
   }
 
@@ -1016,7 +1145,23 @@ function setupIPC() {
   // Receive recorded audio from renderer
   ipcMain.on('audio-recorded', async (event, audioBase64) => {
     const audioBuffer = Buffer.from(audioBase64, 'base64');
-    await processQuestion(audioBuffer);
+    if (appState === 'dictating' || appState === 'transcribing_dictation') {
+      await processDictation(audioBuffer);
+    } else {
+      await processQuestion(audioBuffer);
+    }
+  });
+
+  // Programmatic voice dictation trigger (from floating menu click)
+  ipcMain.on('trigger-dictation', () => {
+    console.log('[Pointy] 🖱️ Voice dictation triggered from UI click');
+    handleDictationToggle();
+  });
+
+  // Receive instant client-side transcribed dictation text (0ms network delay)
+  ipcMain.on('dictation-transcribed', async (event, text) => {
+    logToFile(`🎙️ Instant dictation transcript received: "${text}"`);
+    await processDictation(text);
   });
 
   // Receive typed or transcribed question
@@ -1231,6 +1376,9 @@ function setupIPC() {
       geminiApiKeyMasked: mask(process.env.GEMINI_API_KEY || CONFIG.geminiApiKey),
       GEMINI_MODEL: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3-flash-preview',
       geminiModel: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3-flash-preview',
+      EASYVOICE_API_KEY: process.env.EASYVOICE_API_KEY || CONFIG.easyVoiceApiKey || '',
+      easyVoiceApiKey: process.env.EASYVOICE_API_KEY || CONFIG.easyVoiceApiKey || '',
+      easyVoiceApiKeyMasked: mask(process.env.EASYVOICE_API_KEY || CONFIG.easyVoiceApiKey),
       GOOGLE_TTS_API_KEY: process.env.GOOGLE_TTS_API_KEY || CONFIG.googleTtsApiKey || '',
       googleTtsApiKey: process.env.GOOGLE_TTS_API_KEY || CONFIG.googleTtsApiKey || '',
       googleTtsApiKeyMasked: mask(process.env.GOOGLE_TTS_API_KEY || CONFIG.googleTtsApiKey),
@@ -1252,6 +1400,8 @@ function setupIPC() {
       GEMINI_API_KEY: 'GEMINI_API_KEY',
       geminiModel: 'GEMINI_MODEL',
       GEMINI_MODEL: 'GEMINI_MODEL',
+      easyVoiceApiKey: 'EASYVOICE_API_KEY',
+      EASYVOICE_API_KEY: 'EASYVOICE_API_KEY',
       googleTtsApiKey: 'GOOGLE_TTS_API_KEY',
       GOOGLE_TTS_API_KEY: 'GOOGLE_TTS_API_KEY',
       assemblyaiApiKey: 'ASSEMBLYAI_API_KEY',
@@ -1282,7 +1432,15 @@ function setupIPC() {
 
     // Re-initialize services dynamically
     if (geminiService) geminiService = new GeminiService(process.env.GEMINI_API_KEY);
-    if (googleTtsService) googleTtsService = new GoogleTTSService(process.env.GOOGLE_TTS_API_KEY || process.env.GEMINI_API_KEY);
+    const evKey = (process.env.EASYVOICE_API_KEY || CONFIG.easyVoiceApiKey || '').trim();
+    if (evKey && evKey.startsWith('ev_')) {
+      googleTtsService = new EasyVoiceTTSService(evKey);
+      googleTtsService.prewarm();
+      console.log('[Pointy] 🎙️ EasyVoice TTS re-initialized with Kokoro-82M');
+    } else if (googleTtsService) {
+      googleTtsService = new GoogleTTSService(process.env.GOOGLE_TTS_API_KEY || process.env.GEMINI_API_KEY);
+      googleTtsService.prewarm();
+    }
     if (assemblyaiService) assemblyaiService = new AssemblyAIService(process.env.ASSEMBLYAI_API_KEY);
     if (gnaniService) gnaniService = new GnaniService(process.env.GNANI_API_KEY);
 
@@ -1308,7 +1466,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('chat-speak-text', async (event, text) => {
-    if (!googleTtsService || !googleTtsService.hasApiKey()) {
+    if (!googleTtsService) {
       return { audioContent: null };
     }
     try {
@@ -1343,7 +1501,13 @@ app.whenReady().then(async () => {
   assemblyaiService = new AssemblyAIService(CONFIG.assemblyaiApiKey);
   gnaniService = new GnaniService(CONFIG.gnaniApiKey);
   geminiService = new GeminiService(CONFIG.geminiApiKey);
-  googleTtsService = new GoogleTTSService(CONFIG.googleTtsApiKey);
+  const evKey = (CONFIG.easyVoiceApiKey || process.env.EASYVOICE_API_KEY || '').trim();
+  if (evKey && evKey.startsWith('ev_')) {
+    googleTtsService = new EasyVoiceTTSService(evKey);
+    console.log('[Pointy] 🎙️ EasyVoice TTS service initialized with Kokoro-82M');
+  } else {
+    googleTtsService = new GoogleTTSService(CONFIG.googleTtsApiKey);
+  }
   googleTtsService.prewarm();
   console.log('[Pointy] ⚡ ActionService ready (Notepad, YouTube, Browser, System Launcher active)');
 
@@ -1383,12 +1547,14 @@ app.whenReady().then(async () => {
     console.log('[Pointy]    Get a free key at: https://aistudio.google.com/apikey');
   }
 
-  if (googleTtsService.hasApiKey()) {
+  if (googleTtsService instanceof EasyVoiceTTSService && googleTtsService.hasApiKey()) {
+    console.log('[Pointy] ✅ EasyVoice TTS ready (Kokoro-82M AI Voice)');
+  } else if (googleTtsService.hasApiKey()) {
     console.log('[Pointy] ✅ Google Cloud TTS ready');
   } else if (gnaniService.hasApiKey()) {
     console.log('[Pointy] ✅ Gnani Timbre ready (TTS voice output)');
   } else {
-    console.log('[Pointy] ℹ️  TTS uses natural browser voice playback');
+    console.log('[Pointy] ℹ️  TTS voice output is off (configure EASYVOICE_API_KEY in .env)');
   }
 });
 

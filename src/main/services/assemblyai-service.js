@@ -49,12 +49,12 @@ class AssemblyAIService {
       const uploadUrl = uploadRes.data.upload_url;
       console.log('[AssemblyAI] ✅ Audio uploaded. Requesting transcription...');
 
-      // 2. Submit transcription job (universal-3-5-pro for speed & high accuracy)
+      // 2. Submit transcription job (universal-2 for ultra-fast, robust transcription)
       const transcriptRes = await axios.post(
         `${this.baseUrl}/transcript`,
         {
           audio_url: uploadUrl,
-          speech_models: ['universal-3-5-pro', 'universal-2'],
+          speech_models: ['universal-2'],
         },
         {
           headers: {
@@ -65,7 +65,7 @@ class AssemblyAIService {
       );
 
       const transcriptId = transcriptRes.data.id;
-      console.log(`[AssemblyAI] ⏳ Processing job ${transcriptId}...`);
+      console.log(`[AssemblyAI] ⏳ Processing job ${transcriptId} (universal-2)...`);
 
       // 3. Poll status until completed or failed
       const pollingEndpoint = `${this.baseUrl}/transcript/${transcriptId}`;
@@ -73,7 +73,7 @@ class AssemblyAIService {
       const timeoutMs = 25000;
 
       while (Date.now() - startTime < timeoutMs) {
-        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((r) => setTimeout(r, 250));
 
         const pollRes = await axios.get(pollingEndpoint, {
           headers: {

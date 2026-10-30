@@ -1,4 +1,4 @@
-const { shell } = require('electron');
+const { shell, clipboard } = require('electron');
 const { exec, execSync } = require('child_process');
 const path = require('path');
 const os = require('os');
@@ -586,6 +586,66 @@ class ActionService {
       .replace(/\s+(please|for me|right now)$/i, '')
       .trim();
 
+    // ─── 0. Autonomous App Opening & Prompt Writing ──────────────────────
+    // E.g.: "open claude and write a prompt about quantum computing"
+    //       "open claude and write a prompt in the claude about something"
+    //       "open claude and ask it how photosynthesis works"
+    //       "open chatgpt and write a prompt for software engineer resume"
+    //       "open notepad and type shopping list: milk, eggs, bread"
+    const openAndTypeMatch = clean.match(/^(?:open|launch|start)\s+([a-zA-Z0-9_\s]+?)\s+(?:and\s+)?(?:ask(?:\s+it)?|write(?:\s+a\s+prompt(?:\s+in\s+(?:the\s+)?[a-zA-Z0-9_\s]+)?)?|type(?:\s+a\s+prompt)?|prompt(?:\s+it)?)\s+(?:about|to|for|that|:|in)?\s*(.+)$/i);
+    if (openAndTypeMatch) {
+      const targetApp = openAndTypeMatch[1].trim();
+      const rawPrompt = openAndTypeMatch[2].trim();
+      if (targetApp && rawPrompt) {
+        const appObj = this.findInstalledApp(targetApp) || { name: targetApp };
+        const appName = appObj.name || targetApp;
+        const formattedPrompt = this.formatAIPrompt(rawPrompt, appName);
+        return {
+          matched: true,
+          type: 'open_and_type',
+          app: appName,
+          prompt: formattedPrompt,
+          name: `${appName}: "${formattedPrompt.slice(0, 32)}..."`,
+          reply: `Opening ${appName} and writing your prompt!`,
+        };
+      }
+    }
+
+    // Direct "write a prompt in claude about..." or "ask claude ..."
+    const askAppMatch = clean.match(/^(?:write\s+a\s+prompt\s+in|ask)\s+([a-zA-Z0-9_\s]+?)\s+(?:about|to|:)?\s*(.+)$/i);
+    if (askAppMatch) {
+      const targetApp = askAppMatch[1].trim();
+      const rawPrompt = askAppMatch[2].trim();
+      if (targetApp && rawPrompt) {
+        const appObj = this.findInstalledApp(targetApp) || { name: targetApp };
+        const appName = appObj.name || targetApp;
+        const formattedPrompt = this.formatAIPrompt(rawPrompt, appName);
+        return {
+          matched: true,
+          type: 'open_and_type',
+          app: appName,
+          prompt: formattedPrompt,
+          name: `${appName}: "${formattedPrompt.slice(0, 32)}..."`,
+          reply: `Opening ${appName} and typing your prompt!`,
+        };
+      }
+    }
+
+    // Direct dictation / typing into active window: e.g. "type this: hello everyone", "dictate please review my document"
+    const directTypeMatch = clean.match(/^(?:type\s+this|dictate|type)\s*:\s*(.+)$/i) ||
+      clean.match(/^(?:type\s+this|dictate)\s+(.+)$/i) ||
+      clean.match(/^type\s+into\s+(?:active\s+window|document|screen)\s*:?\s*(.+)$/i);
+    if (directTypeMatch) {
+      const textToType = directTypeMatch[1].trim();
+      return {
+        matched: true,
+        type: 'type_text',
+        text: textToType,
+        name: `Type: "${textToType.slice(0, 30)}..."`,
+        reply: `Typing into your active window!`,
+      };
+    }
+
     // ─── 1. Media & Song Playback Across Browsers and Apps ────────────────
     // A. Play in specific browser: "play honeypie in brave", "play honeypie on comet", "play honeypie from youtube in brave"
     const inBrowserPlayMatch = clean.match(/^play\s+(.+?)(?:\s+(?:from|on|in)\s+youtube)?\s+(?:in|on)\s+(brave|comet|chrome|edge)$/i) ||
@@ -1004,6 +1064,154 @@ class ActionService {
   }
 
   /**
+   * Intelligently format a comprehensive prompt for AI apps (Claude, ChatGPT, etc.)
+   * or clean up a requested text to type.
+   */
+  formatAIPrompt(rawTopic, appName = 'Claude') {
+    if (!rawTopic) {
+      return 'Write a comprehensive and engaging overview of this topic with key insights.';
+    }
+    let topic = rawTopic.trim()
+      .replace(/^(?:a\s+prompt\s+(?:in\s+(?:the\s+)?[a-zA-Z0-9_\s]+\s+)?about|prompt\s+about|about|to\s+write\s+a\s+prompt\s+about|to|write\s+a\s+prompt\s+about)\s+/i, '')
+      .replace(/\s+in\s+(?:the\s+)?(claude|chatgpt|notepad|word)$/i, '')
+      .trim();
+
+    // If it's already a full question or actionable command (e.g. "how does photosynthesis work")
+    if (/^(how|why|what|when|where|who|explain|write|create|generate|summarize|compare|help|give|draft)\b/i.test(topic)) {
+      return topic.charAt(0).toUpperCase() + topic.slice(1);
+    }
+
+    // Generic "something"
+    if (topic.toLowerCase() === 'something') {
+      return 'Write an engaging, insightful guide exploring how artificial intelligence and modern technology are shaping everyday productivity, learning, and creativity.';
+    }
+
+    // AI apps (Claude / ChatGPT) benefit from structured, high-value prompt formatting
+    if (/claude|chatgpt|perplexity|ai/i.test(appName)) {
+      return `Write a comprehensive, insightful guide about ${topic}. Explain the fundamental concepts, key principles, and 3 practical real-world applications in simple, engaging terms.`;
+    }
+
+    return topic.charAt(0).toUpperCase() + topic.slice(1);
+  }
+
+  /**
+   * Types or pastes text into the currently active foreground window on Windows.
+   * Handles Unicode, emojis, newlines, and quotes without escaping errors.
+   */
+  async typeTextIntoActiveWindow(text, pressEnter = false) {
+    if (!text) return false;
+    return new Promise((resolve) => {
+      try {
+        // 1. Instant native clipboard set via Electron C++ API (0 ms)
+        if (clipboard && typeof clipboard.writeText === 'function') {
+          clipboard.writeText(text);
+        } else {
+          // Ultra-fast Windows native clip.exe fallback (~60ms) when outside Electron
+          try {
+            execSync('clip', { input: text, timeout: 1000 });
+          } catch (_) {
+            const escaped = text.replace(/"/g, '`"');
+            execSync(`powershell -NoProfile -Command "Set-Clipboard -Value '${escaped}'"`, { timeout: 2000 });
+          }
+        }
+
+        // 2. Ultra-fast simulated paste (Ctrl+V) via lightweight WScript (takes ~100ms vs 500ms PowerShell)
+        const vbsPath = path.join(os.tmpdir(), `pointy_paste_${Date.now()}_${Math.floor(Math.random() * 1000)}.vbs`);
+        const vbsContent = [
+          'Set w = CreateObject("WScript.Shell")',
+          'w.SendKeys "^v"',
+          pressEnter ? 'WScript.Sleep 150\r\nw.SendKeys "{ENTER}"' : '',
+        ].filter(Boolean).join('\r\n');
+
+        fs.writeFile(vbsPath, vbsContent, (wErr) => {
+          if (wErr) {
+            console.warn('[ActionService] Error creating paste script:', wErr.message);
+            return resolve(false);
+          }
+          exec(`wscript "${vbsPath}"`, (execErr) => {
+            try { fs.unlinkSync(vbsPath); } catch (_) {}
+            if (execErr) {
+              console.warn('[ActionService] Error simulating paste:', execErr.message);
+              resolve(false);
+            } else {
+              console.log(`[ActionService] ⚡ Instantly pasted text into active window (${text.length} chars)`);
+              resolve(true);
+            }
+          });
+        });
+      } catch (e) {
+        console.warn('[ActionService] Exception in typeTextIntoActiveWindow:', e.message);
+        resolve(false);
+      }
+    });
+  }
+
+  /**
+   * Launches or activates an app, waits for it to become the active foreground window,
+   * and automatically types/pastes the prompt or text into its input box!
+   */
+  async openAppAndType(appName, text, pressEnter = false) {
+    if (!appName || !text) return false;
+
+    console.log(`[ActionService] 🚀 Opening ${appName} and typing prompt: "${text.slice(0, 40)}..."`);
+
+    // 1. Resolve and launch the app
+    const app = this.findInstalledApp(appName) || { name: appName, target: appName };
+    const appTitle = app.name || appName;
+
+    if (app.type === 'windows_app_id' && app.appId) {
+      exec(`start "" "shell:AppsFolder\\${app.appId}"`, { shell: 'cmd.exe' });
+    } else if (app.type === 'launch_app' && app.target) {
+      exec(`start "" "${app.target}"`, { shell: 'cmd.exe' });
+    } else if (app.type === 'system_uri' && app.target) {
+      exec(`start ${app.target}`, { shell: 'cmd.exe' });
+    } else if (/claude/i.test(appName)) {
+      exec(`start "" "shell:AppsFolder\\Claude_pzs8sxrjxfjjc!Claude"`, { shell: 'cmd.exe' });
+    } else if (/chatgpt/i.test(appName)) {
+      exec(`start "" "shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App"`, { shell: 'cmd.exe' });
+    } else if (/notepad/i.test(appName)) {
+      exec(`start notepad.exe`, { shell: 'cmd.exe' });
+    } else {
+      exec(`start "" "${app.target || appName}"`, { shell: 'cmd.exe' });
+    }
+
+    // 2. Wait for the window to appear and be ready (~1200ms)
+    await new Promise(r => setTimeout(r, 1200));
+
+    // 3. Bring to front and type into the input area!
+    return new Promise((resolve) => {
+      const escaped = text.replace(/"/g, '`"');
+      const searchTitle = /claude/i.test(appName) ? 'Claude' :
+                          /chatgpt/i.test(appName) ? 'ChatGPT' :
+                          /notepad/i.test(appName) ? 'Notepad' :
+                          appTitle;
+
+      const psScript = `
+$w = New-Object -ComObject WScript.Shell
+$w.AppActivate("${searchTitle}")
+Start-Sleep -Milliseconds 450
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Clipboard]::SetText("${escaped}")
+$w.SendKeys('^v')
+if (${pressEnter ? 1 : 0} -eq 1) {
+  Start-Sleep -Milliseconds 250
+  $w.SendKeys('{ENTER}')
+}
+`;
+      const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+      exec(`powershell -NoProfile -EncodedCommand ${encoded}`, (err) => {
+        if (err) {
+          console.warn('[ActionService] Error typing into app:', err.message);
+          resolve(false);
+        } else {
+          console.log(`[ActionService] ✅ Successfully typed prompt into ${appName}!`);
+          resolve(true);
+        }
+      });
+    });
+  }
+
+  /**
    * Executes the resolved action on the desktop.
    *
    * @param {object} action - Resolved action details
@@ -1015,6 +1223,23 @@ class ActionService {
     console.log(`[ActionService] 🚀 Executing action: type=${type}, name="${name || ''}"`);
 
     try {
+      // 0a. Open App & Type Prompt / Write in App (Claude, ChatGPT, Notepad, etc.)
+      if (type === 'open_and_type') {
+        const appName = action.app || action.target || action.name || 'Claude';
+        const prompt = action.prompt || action.text || '';
+        const pressEnter = !!action.pressEnter;
+        await this.openAppAndType(appName, prompt, pressEnter);
+        return true;
+      }
+
+      // 0b. Direct Type / Dictate into active foreground window
+      if (type === 'type_text' || type === 'dictate') {
+        const text = action.text || action.prompt || '';
+        const pressEnter = !!action.pressEnter;
+        await this.typeTextIntoActiveWindow(text, pressEnter);
+        return true;
+      }
+
       // 0. Direct YouTube song/video playback in specific browser
       if (type === 'youtube_play_browser') {
         const videoId = await this.fetchYouTubeVideoId(action.query);

@@ -3,8 +3,7 @@ const https = require('https');
 
 /**
  * Google Cloud Text-to-Speech Service
- * Uses Google Cloud TTS REST API v1 with persistent HTTPS Keep-Alive
- * to eliminate cold TLS handshake delays (cutting synthesis from ~3.8s to ~400ms).
+ * Uses Google Cloud TTS REST API v1 with persistent HTTPS Keep-Alive.
  */
 class GoogleTTSService {
   constructor(apiKey) {
@@ -74,14 +73,14 @@ class GoogleTTSService {
 
   /**
    * Synthesize speech from text.
-   * Returns base64 encoded audio or null on failure (which triggers browser TTS fallback).
+   * Uses Google Cloud Neural2 TTS.
    *
    * @param {string} text - Text to speak
    * @param {string} languageCode - e.g. 'en-US', 'hi-IN'
    * @returns {Promise<string|null>} Base64 audio string
    */
   async speak(text, languageCode = 'en-US') {
-    if (!this.hasApiKey() || !text) return null;
+    if (!text || !this.hasApiKey()) return null;
 
     try {
       console.log(`[GoogleTTS] 🔊 Synthesizing speech for: "${text.slice(0, 45)}..."`);
@@ -92,7 +91,6 @@ class GoogleTTSService {
           input: { text },
           voice: {
             languageCode: languageCode,
-            // Ultra-fast high-fidelity Neural2 voice (200-250ms synthesis for short sentences)
             name: languageCode === 'hi-IN' ? 'hi-IN-Neural2-A' : 'en-US-Neural2-F',
             ssmlGender: 'FEMALE',
           },
@@ -107,20 +105,19 @@ class GoogleTTSService {
           headers: {
             'Content-Type': 'application/json',
           },
-          timeout: 4500, // Fast 4.5s timeout prevents hanging
+          timeout: 3500,
         }
       );
 
       if (response.data && response.data.audioContent) {
-        console.log('[GoogleTTS] ✅ Audio synthesized successfully');
+        console.log('[GoogleTTS] ✅ Cloud audio synthesized successfully');
         return response.data.audioContent;
       }
-      return null;
     } catch (err) {
-      console.warn('[GoogleTTS] Speech synthesis error:', err.response?.data?.error?.message || err.message);
-      // Return null to gracefully fall back to Web Speech API in renderer
-      return null;
+      console.warn('[GoogleTTS] Cloud TTS notice:', err.response?.data?.error?.message || err.message);
     }
+
+    return null;
   }
 }
 

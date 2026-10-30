@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld('pointyAPI', {
   onCursorFollow: (callback) => ipcRenderer.on('cursor-follow', (_, pos) => callback(pos)),
   onToggleTextInput: (callback) => ipcRenderer.on('toggle-text-input', callback),
   triggerVoiceSummon: () => ipcRenderer.send('trigger-voice-summon'),
+  triggerDictation: () => ipcRenderer.send('trigger-dictation'),
+  sendDictationText: (text) => ipcRenderer.send('dictation-transcribed', text),
+  onStartDictation: (callback) => ipcRenderer.on('start-dictation', (_, pos) => callback(pos)),
+  onDictationResult: (callback) => ipcRenderer.on('dictation-result', (_, data) => callback(data)),
 
   // Notify main process
   pointingComplete: () => ipcRenderer.send('pointing-complete'),

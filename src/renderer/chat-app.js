@@ -451,7 +451,9 @@
       const audioResult = await window.chatAPI.speakText(cleanText);
 
       if (audioResult && audioResult.audioContent) {
-        const audioSrc = `data:audio/mp3;base64,${audioResult.audioContent}`;
+        const isWav = audioResult.audioContent.startsWith('UklGR');
+        const mimeType = isWav ? 'audio/wav' : 'audio/mp3';
+        const audioSrc = `data:${mimeType};base64,${audioResult.audioContent}`;
         activeAudio = new Audio(audioSrc);
         activeAudio.play();
         activeAudio.onended = () => {
@@ -459,20 +461,11 @@
           activeAudio = null;
         };
       } else {
-        // Fallback to browser SpeechSynthesis
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.rate = 1.05;
-        utterance.onend = () => {
-          btn.classList.remove('speaking');
-        };
-        window.speechSynthesis.speak(utterance);
+        btn.classList.remove('speaking');
       }
     } catch (err) {
-      console.warn('TTS error, falling back to speech synthesis:', err);
+      console.warn('TTS playback notice:', err);
       btn.classList.remove('speaking');
-      const cleanText = text.replace(/```[\s\S]*?```/g, '').replace(/[*_#`]/g, '');
-      const utterance = new SpeechSynthesisUtterance(cleanText);
-      window.speechSynthesis.speak(utterance);
     }
   }
 
@@ -821,7 +814,11 @@
           geminiStatusBadge.textContent = 'Missing';
           geminiStatusBadge.className = 'status-badge missing';
         }
-        if (keys.GOOGLE_TTS_API_KEY) inputTtsKey.value = keys.GOOGLE_TTS_API_KEY;
+        if (keys.EASYVOICE_API_KEY) {
+          inputTtsKey.value = keys.EASYVOICE_API_KEY;
+        } else if (keys.GOOGLE_TTS_API_KEY) {
+          inputTtsKey.value = keys.GOOGLE_TTS_API_KEY;
+        }
         if (keys.ASSEMBLYAI_API_KEY) inputAssemblyKey.value = keys.ASSEMBLYAI_API_KEY;
         if (keys.GEMINI_MODEL || keys.geminiModel) {
           currentModel = keys.GEMINI_MODEL || keys.geminiModel;
@@ -894,10 +891,12 @@
       updateModelSelectorLabel(currentModel);
 
       // 1. Save API Keys and active model to environment
+      const ttsVal = inputTtsKey.value.trim();
       const keys = {
         GEMINI_API_KEY: inputGeminiKey.value.trim(),
         GEMINI_MODEL: currentModel,
-        GOOGLE_TTS_API_KEY: inputTtsKey.value.trim(),
+        EASYVOICE_API_KEY: ttsVal,
+        GOOGLE_TTS_API_KEY: ttsVal.startsWith('ev_') ? '' : ttsVal,
         ASSEMBLYAI_API_KEY: inputAssemblyKey.value.trim()
       };
       await window.chatAPI.saveApiKeys(keys);

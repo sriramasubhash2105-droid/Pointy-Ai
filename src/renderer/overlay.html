@@ -31,12 +31,28 @@
         <span class="quick-icon">🎙️</span>
         <span class="quick-label">Speak</span>
       </button>
+      <button id="btn-quick-dictate" class="quick-action-btn" title="Dictate to Active Window (Alt+D)">
+        <span class="quick-icon">✍️</span>
+        <span class="quick-label">Dictate</span>
+      </button>
       <button id="btn-quick-type" class="quick-action-btn" title="Type a Question (Alt+T)">
         <span class="quick-icon">⌨️</span>
         <span class="quick-label">Type</span>
       </button>
     </div>
 
+  </div>
+
+  <!-- Floating Voice Dictation Capsule (Appears beside cursor during Alt+D dictation) -->
+  <div id="dictation-card" class="dictation-card hidden">
+    <div class="dictation-wave-container">
+      <span class="dictation-pulse-dot"></span>
+      <span class="dictation-icon">🎙️</span>
+    </div>
+    <div class="dictation-content">
+      <div id="dictation-status-text" class="dictation-status-text">Dictating... Speak clearly</div>
+      <div class="dictation-sub-text">Press <kbd>Alt+D</kbd>, click or pause to paste instantly</div>
+    </div>
   </div>
 
   <!-- Minimalist Light-Red Outgoing Speech Bubble (Centered slightly above midpoint) -->
