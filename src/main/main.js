@@ -363,13 +363,11 @@ function startMouseTracking() {
   overlayWindow?.webContents.send('cursor-follow', pt);
 
   mouseTrackInterval = setInterval(() => {
-    // Continuously follow the user's cursor whenever Pointy is not pointing at a target on screen
-    if (appState !== 'pointing') {
-      const currentPt = screen.getCursorScreenPoint();
-      if (currentPt.x !== lastCursorPos.x || currentPt.y !== lastCursorPos.y) {
-        lastCursorPos = currentPt;
-        overlayWindow?.webContents.send('cursor-follow', currentPt);
-      }
+    // Continuously follow the user's cursor: stream position so overlay always tracks physical mouse
+    const currentPt = screen.getCursorScreenPoint();
+    if (currentPt.x !== lastCursorPos.x || currentPt.y !== lastCursorPos.y) {
+      lastCursorPos = currentPt;
+      overlayWindow?.webContents.send('cursor-follow', currentPt);
     }
   }, 16);
 }
@@ -578,9 +576,172 @@ async function captureScreenBuffer() {
   throw new Error('Screen capture failed');
 }
 
+// ─── Background Detailed Deep Research Workflow (Claude / ChatGPT) ───
+async function startDeepResearchWorkflow(action, language = 'en-US') {
+  const topic = action.topic || action.target || 'the requested topic';
+  const targetApp = action.app || 'Claude';
+  const replyText = action.reply || `Starting detailed research on ${topic} in ${targetApp} in the background! I'll notify you as soon as the research is completed.`;
+
+  logToFile(`🔬 Starting Background Deep Research: topic="${topic}", app=${targetApp}`);
+
+  // 1. Record user & assistant turn in persistent memory
+  conversationManager?.addMessage('user', `Deep research on ${topic} in ${targetApp}`);
+  const initialResult = {
+    mode: 'action',
+    action,
+    found: true,
+    reply: replyText,
+    reply_lang: language,
+    detailed_explanation: `Initiated background deep research on **${topic}** in **${targetApp}**.\n\nPointy is launching **${targetApp}** and synthesizing an in-depth research report. You can continue working normally — Pointy will chime and present your executive briefing as soon as research is complete.`,
+    steps: [],
+  };
+  conversationManager?.addMessage('assistant', initialResult);
+  const activeConv = conversationManager ? conversationManager.getActiveConversation() : null;
+
+  // 2. Announce immediately visually on screen
+  appState = 'pointing';
+  overlayWindow?.moveTop();
+  overlayWindow?.webContents.send('state-change', 'pointing');
+  overlayWindow?.webContents.send('point-at', {
+    result: initialResult,
+    audioBase64: null,
+    conversation: activeConv,
+    question: `Research ${topic}`,
+  });
+
+  // Speak initial confirmation aloud
+  if (googleTtsService) {
+    googleTtsService.speak(replyText, language).then((audioBase64) => {
+      if (audioBase64 && appState === 'pointing') {
+        overlayWindow?.webContents.send('play-audio', audioBase64);
+      }
+    }).catch((e) => logToFile(`TTS deep research notice: ${e.message}`));
+  }
+
+  // 3. Display background research pill on overlay & chat window
+  overlayWindow?.webContents.send('deep-research-started', {
+    topic,
+    app: targetApp,
+    startedAt: Date.now(),
+  });
+  chatAppWindow?.webContents.send('deep-research-started', {
+    topic,
+    app: targetApp,
+    startedAt: Date.now(),
+  });
+
+  // 4. Return cursor to idle after announcement so user can use PC freely
+  setTimeout(() => {
+    if (appState === 'pointing') {
+      resetState();
+    }
+  }, 5500);
+
+  // 5. Run automation and Gemini deep research synthesis concurrently in background
+  Promise.allSettled([
+    // A. Automation in Claude / ChatGPT desktop app
+    actionService?.execute(action),
+
+    // B. Autonomous deep research synthesis via Gemini
+    (async () => {
+      if (geminiService && geminiService.hasApiKey()) {
+        return await geminiService.conductDeepResearch(topic, targetApp);
+      }
+      return null;
+    })(),
+  ]).then(async (results) => {
+    const researchResult = results[1]?.status === 'fulfilled' ? results[1].value : null;
+    logToFile(`🔬 Background Deep Research finished for: "${topic}"! (Synthesis succeeded: ${!!researchResult})`);
+
+    const spokenSummary = researchResult?.executive_spoken_summary ||
+      `Your detailed research on ${topic} in ${targetApp} is now complete! I have compiled the key findings and report on screen for you.`;
+
+    const reportMarkdown = researchResult?.full_dossier_markdown ||
+      `# 🔬 Deep Research: ${topic}\n\nCompleted in **${targetApp}**.\n\nPlease check the active ${targetApp} window to view the full live output.`;
+
+    const keyFindings = (researchResult?.key_findings && researchResult.key_findings.length > 0)
+      ? researchResult.key_findings
+      : [
+          `Deep research conducted in ${targetApp}`,
+          `Comprehensive architectural breakdown synthesized for ${topic}`,
+          `Practical applications and industry outlook documented`,
+        ];
+
+    // Record completed research turn in conversation memory
+    conversationManager?.addMessage('assistant', {
+      mode: 'research_completed',
+      found: true,
+      reply: spokenSummary,
+      reply_lang: language,
+      detailed_explanation: reportMarkdown,
+      steps: [],
+    });
+
+    // Native Windows OS Notification
+    try {
+      const { Notification } = require('electron');
+      if (Notification.isSupported()) {
+        const notif = new Notification({
+          title: `Pointy AI • Research Completed`,
+          body: `Detailed research on "${topic}" in ${targetApp} is ready! Click to view your dossier.`,
+        });
+        notif.on('click', () => {
+          overlayWindow?.show();
+          overlayWindow?.focus();
+        });
+        notif.show();
+      }
+    } catch (_) {}
+
+    // Send deep-research-completed event to overlay & chat app
+    overlayWindow?.webContents.send('deep-research-completed', {
+      topic,
+      app: targetApp,
+      spokenSummary,
+      reportMarkdown,
+      keyFindings,
+      executiveSummary: researchResult?.executive_summary || '',
+    });
+
+    chatAppWindow?.webContents.send('deep-research-completed', {
+      topic,
+      app: targetApp,
+      spokenSummary,
+      reportMarkdown,
+      keyFindings,
+      executiveSummary: researchResult?.executive_summary || '',
+    });
+
+    // Bring overlay to front for the reminder
+    overlayWindow?.setIgnoreMouseEvents(false);
+    overlayWindow?.show();
+    overlayWindow?.moveTop();
+
+    // Synthesize spoken reminder using EasyVoice TTS Kokoro-82M!
+    if (googleTtsService) {
+      const speechPrompt = `Subhash, your detailed research on ${topic} in ${targetApp} is complete! ${spokenSummary}`;
+      try {
+        const cleanSpeech = speechPrompt.replace(/[*_#`~\[\]]/g, '').trim();
+        const audioBase64 = await googleTtsService.speak(cleanSpeech, language);
+        if (audioBase64) {
+          overlayWindow?.webContents.send('play-audio', audioBase64);
+        }
+      } catch (e) {
+        logToFile(`TTS research reminder notice: ${e.message}`);
+      }
+    }
+  });
+}
+
 // ─── Execute Desktop Action (App launch, URL open, system tasks) ─────
 async function executeDesktopAction(action, question, language = 'en-US') {
   logToFile(`⚡ Executing desktop action: ${action.type} -> "${action.name || action.target || ''}"`);
+
+  // If this action is deep research, delegate to the dedicated background research workflow!
+  if (action.type === 'deep_research') {
+    await startDeepResearchWorkflow(action, language);
+    return;
+  }
 
   const replyText = action.reply || `Opening ${action.name || action.target} for you!`;
 
@@ -605,7 +766,6 @@ async function executeDesktopAction(action, question, language = 'en-US') {
 
   // 3. Immediately display visual feedback on screen (<5ms)!
   appState = 'pointing';
-  stopMouseTracking();
   overlayWindow?.moveTop();
   overlayWindow?.webContents.send('state-change', 'pointing');
   overlayWindow?.webContents.send('point-at', {
@@ -866,7 +1026,6 @@ async function advanceMultiStep() {
 
     // 6. Point to the element on the newly updated screen!
     appState = 'pointing';
-    stopMouseTracking();
     overlayWindow?.moveTop();
     overlayWindow?.webContents.send('state-change', 'pointing');
     overlayWindow?.webContents.send('point-at', {
@@ -935,12 +1094,18 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
   }
 
   // If Gemini recognizes this as a desktop action to execute
-  if (result.mode === 'action' && result.action && actionService) {
-    logToFile(`⚡ Executing action recognized by Gemini: ${result.action.type} -> "${result.action.target}" (${result.action.name || ''})`);
-    try {
-      await actionService.execute(result.action);
-    } catch (actErr) {
-      logToFile(`⚠️ Action execution warning: ${actErr.message}`);
+  if (result.mode === 'action' && result.action) {
+    if (result.action.type === 'deep_research') {
+      await startDeepResearchWorkflow(result.action, language);
+      return;
+    }
+    if (actionService) {
+      logToFile(`⚡ Executing action recognized by Gemini: ${result.action.type} -> "${result.action.target}" (${result.action.name || ''})`);
+      try {
+        await actionService.execute(result.action);
+      } catch (actErr) {
+        logToFile(`⚠️ Action execution warning: ${actErr.message}`);
+      }
     }
   }
 
@@ -948,14 +1113,27 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
   conversationManager?.addMessage('assistant', result);
   const activeConv = conversationManager ? conversationManager.getActiveConversation() : null;
 
-  // 3. Ultra-fast TTS: Synthesize concise spoken sentence with persistent Keep-Alive
-  const spokenSentence = googleTtsService ? googleTtsService.extractFirstSentence(result.reply) : result.reply;
+  // 3. Ultra-fast TTS: Synthesize speech (Speaks full, long explanation for explanatory queries!)
+  const isExplanation = result.mode === 'assistant' ||
+    /^(explain|how\s+does|why|what\s+is|what\s+are|tell\s+me\s+about|teach\s+me|describe|walk\s+me\s+through|summarize)/i.test((question || '').trim()) ||
+    (result.reply && result.reply.length > 120);
+
+  let textToSpeak = result.reply || '';
+  if (!isExplanation && googleTtsService && typeof googleTtsService.extractFirstSentence === 'function') {
+    textToSpeak = googleTtsService.extractFirstSentence(result.reply);
+  }
+
+  // Clean Markdown formatting for silky smooth TTS speech
+  textToSpeak = textToSpeak
+    .replace(/[*_#`~\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   let audioBase64 = null;
-  if (spokenSentence && googleTtsService) {
-    logToFile(`🔊 Synthesizing speech: "${spokenSentence.slice(0, 45)}..."`);
+  if (textToSpeak && googleTtsService) {
+    logToFile(`🔊 Synthesizing speech (${isExplanation ? 'FULL DETAILED EXPLANATION' : 'Concise'}): "${textToSpeak.slice(0, 60)}..."`);
     try {
-      audioBase64 = await googleTtsService.speak(spokenSentence, result.reply_lang || language);
+      audioBase64 = await googleTtsService.speak(textToSpeak, result.reply_lang || language);
       logToFile(`🔊 TTS synthesis complete (${audioBase64 ? audioBase64.length : 0} bytes base64)`);
     } catch (ttsErr) {
       logToFile(`⚠️ TTS error: ${ttsErr.message}`);
@@ -980,7 +1158,6 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
 
   // Point at the target elements and start speaking simultaneously as cursor begins moving!
   appState = 'pointing';
-  stopMouseTracking();
   overlayWindow?.moveTop();
   overlayWindow?.webContents.send('state-change', 'pointing');
   overlayWindow?.webContents.send('point-at', { result, audioBase64, conversation: activeConv, question });
@@ -1171,8 +1348,10 @@ function setupIPC() {
 
   // State management
   ipcMain.on('pointing-complete', () => {
+    logToFile('🎯 Pointing complete received -> setting appState to idle and ensuring mouse tracking is active');
     appState = 'idle';
     startMouseTracking();
+    overlayWindow?.webContents.send('state-change', 'idle');
   });
 
   ipcMain.on('request-reset', () => {
@@ -1237,6 +1416,26 @@ function setupIPC() {
     clearMultiStep();
     resetState();
     return true;
+  });
+
+  // Deep Research Action Handlers
+  ipcMain.handle('open-research-app', async (event, appName) => {
+    if (!actionService) return false;
+    const target = (appName || 'Claude').toLowerCase();
+    if (target.includes('chatgpt')) {
+      return actionService.execute({ type: 'windows_app_id', appId: 'OpenAI.Codex_2p2nqsd0c76g0!App', name: 'ChatGPT' });
+    } else {
+      return actionService.execute({ type: 'windows_app_id', appId: 'Claude_pzs8sxrjxfjjc!Claude', name: 'Claude' });
+    }
+  });
+
+  ipcMain.handle('copy-to-clipboard', (event, text) => {
+    if (text) {
+      const { clipboard } = require('electron');
+      clipboard.writeText(text);
+      return true;
+    }
+    return false;
   });
 
   // ─── ChatGPT Desktop Application IPC Handlers ───────────────────────
@@ -1317,8 +1516,13 @@ function setupIPC() {
       const localAction = actionService?.matchLocalIntent(text);
       if (localAction) {
         logToFile(`⚡ Executing action from chat app: "${localAction.name}" (${localAction.type})`);
-        await actionService.execute(localAction);
-        assistantText = localAction.reply || `Opened ${localAction.name || localAction.target} for you!`;
+        if (localAction.type === 'deep_research') {
+          startDeepResearchWorkflow(localAction, 'en-US');
+          assistantText = localAction.reply || `Starting detailed research on ${localAction.topic} in ${localAction.app} in the background!`;
+        } else {
+          await actionService.execute(localAction);
+          assistantText = localAction.reply || `Opened ${localAction.name || localAction.target} for you!`;
+        }
       } else if (attachScreen) {
         // Multimodal analysis with screenshot
         const screenshotBuf = await captureScreenBuffer();

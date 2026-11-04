@@ -113,7 +113,38 @@
     <div id="card-resize-handle" style="display:none"></div>
   </div>
 
+  <!-- Floating Background Research Pill (Appears while background research is running) -->
+  <div id="research-progress-capsule" class="research-progress-capsule hidden">
+    <div class="research-capsule-spinner"></div>
+    <span class="research-capsule-icon">🔬</span>
+    <span id="research-capsule-text" class="research-capsule-text">Researching in Claude...</span>
+    <button id="btn-dismiss-research-capsule" class="research-capsule-close" title="Hide badge (research continues in background)">×</button>
+  </div>
 
+  <!-- Floating Deep Research Dossier Card (Appears when background research completes) -->
+  <div id="research-dossier-card" class="research-dossier-card hidden">
+    <div class="dossier-header">
+      <div class="dossier-header-left">
+        <span class="dossier-badge">🔬 Research Complete</span>
+        <span id="dossier-app-tag" class="dossier-app-tag">Claude</span>
+      </div>
+      <div class="dossier-header-right">
+        <button id="btn-copy-dossier" class="dossier-btn-small" title="Copy Full Research Report">📋 Copy</button>
+        <button id="btn-open-research-app" class="dossier-btn-small" title="Open Desktop App">🚀 Open App</button>
+        <button id="btn-close-dossier" class="dossier-btn-close" title="Dismiss">×</button>
+      </div>
+    </div>
+    <div class="dossier-body">
+      <h3 id="dossier-topic-title" class="dossier-topic-title">Research Topic</h3>
+      <div id="dossier-spoken-summary" class="dossier-spoken-summary"></div>
+      <div class="dossier-findings-section">
+        <div class="dossier-section-title">Key Discoveries & Strategic Insights</div>
+        <ul id="dossier-findings-list" class="dossier-findings-list"></ul>
+      </div>
+      <div id="dossier-full-report" class="dossier-full-report collapsed"></div>
+      <button id="btn-toggle-full-report" class="dossier-toggle-report">View Full Research Report ▾</button>
+    </div>
+  </div>
 
   <!-- Text Input fallback (Double-click or press Enter to type) -->
   <div id="text-input-container" class="text-input-container hidden">

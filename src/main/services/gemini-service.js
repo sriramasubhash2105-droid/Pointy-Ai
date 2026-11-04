@@ -54,19 +54,20 @@ CONVERSATIONAL MEMORY & ASSISTANT INTELLIGENCE:
      * "reply": Concise, natural spoken answer (1-2 sentences, under 18 words) suitable for Google Cloud TTS.
      * "detailed_explanation": Same as reply or a concise single sentence.
      * "steps": Pinpoint the EXACT bounding box [ymin, xmin, ymax, xmax] (0..1000) tightly enclosing the requested element.
-   - ASSISTANT / EXPLANATORY QUESTIONS (e.g. "what's on my screen?", "explain...", "who is this?", "summarize this page", "how does this work?"):
+   - ASSISTANT / EXPLANATORY QUESTIONS (e.g. "explain...", "how does this work?", "what is...", "tell me about...", "why...", "teach me...", "what's on my screen?", "summarize this page", "walk me through..."):
      * "mode": "assistant"
-     * "reply": Clear, conversational spoken summary (1-2 sentences, under 28 words) capturing the key takeaway naturally for voice.
-     * "detailed_explanation": A concise, well-structured 1-2 paragraph summary in markdown.
+     * "reply": A comprehensive, articulate, and engaging spoken explanation (4-8 complete sentences, ~70 to 140 words). Speak at length to thoroughly and clearly teach and explain the concepts, how they work, and why they matter, rather than giving a brief 1-2 sentence brush-off! Speak conversationally and educationally with clear vocal flow.
+     * "detailed_explanation": A structured, comprehensive multi-section Markdown document with headings, bullet points, technical breakdowns, and key takeaways.
      * "steps": If the question refers to a visible element or window on screen, tightly box it so Pointy can anchor beside it; otherwise leave "steps": [].
      * "found": true
 
-   - DESKTOP ACTION / ASSISTANT EXECUTION INSTRUCTIONS (e.g. "open notepad", "open comet", "open brave", "open antigravity ide", "open claude", "open chrome from student account", "open calendar in brave from work profile", "search nodejs in brave", "ask comet about mars", "play honeypie in brave", "play honeypie on spotify", "play music from apple music", "next song"):
+   - DESKTOP ACTION / ASSISTANT EXECUTION INSTRUCTIONS (e.g. "open notepad", "open comet", "open brave", "open antigravity ide", "open claude", "do a detailed research on quantum computing in claude", "deep research on renewable energy in chatgpt", "open chrome from student account", "open calendar in brave from work profile", "search nodejs in brave", "ask comet about mars", "play honeypie in brave", "play honeypie on spotify", "play music from apple music", "next song"):
      * "mode": "action"
-     * "reply": Concise spoken announcement (under 12 words), e.g. "Opening Comet!", "Opening Brave!", "Opening Antigravity IDE!", "Playing Honeypie in Brave!"
+     * "reply": Concise spoken announcement (under 12 words), e.g. "Opening Comet!", "Starting detailed research on quantum computing in Claude in the background!", "Opening Brave!", "Opening Antigravity IDE!"
      * "detailed_explanation": "Executed action: [Name]."
      * "action": {
-         "type": "open_and_type" | "type_text" | "launch_app" | "windows_app_id" | "open_in_browser" | "browser_profile" | "browser_profile_url" | "youtube_play_browser" | "spotify_play" | "apple_music_play" | "youtube_play" | "media_key" | "open_url" | "open_folder" | "system_uri",
+         "type": "deep_research" | "open_and_type" | "type_text" | "launch_app" | "windows_app_id" | "open_in_browser" | "browser_profile" | "browser_profile_url" | "youtube_play_browser" | "spotify_play" | "apple_music_play" | "youtube_play" | "media_key" | "open_url" | "open_folder" | "system_uri",
+         "topic": "<Clean topic of research if deep_research>",
          "app": "<claude | chatgpt | notepad | word | code | etc.>",
          "prompt": "<Formulated prompt to write into the target app>",
          "text": "<Text to type into active window>",
@@ -80,6 +81,14 @@ CONVERSATIONAL MEMORY & ASSISTANT INTELLIGENCE:
          "name": "<Display name of app/action>"
        }
      * USER ENVIRONMENT CONTEXT:
+       - Background Deep Research Execution:
+         * e.g. "do a detailed research on quantum computing in claude", "deep research on renewable energy in chatgpt", "detailed research about solid state batteries", "research neural networks in claude in background":
+           - "type": "deep_research"
+           - "app": "claude" (or "chatgpt")
+           - "topic": "<Clean research topic>"
+           - "prompt": "Please conduct a comprehensive, deep-dive research report on: <Topic>. Structure your analysis into: 1. Executive Summary & Core Breakthroughs, 2. Fundamental Principles & Architecture, 3. State of the Art & Industry Impact, 4. Current Challenges & Limitations, 5. Future Outlook (Next 3-5 Years). Provide deep, thorough, and analytical explanations."
+           - "reply": "Starting detailed research on <topic> in <app> in the background! I'll notify you as soon as the research is completed."
+           - "pressEnter": true
        - Autonomous App Prompt Writing & Typing:
          * e.g. "open claude and write a prompt about quantum computing", "open claude and write a prompt in the claude about something", "open claude and ask it how photosynthesis works", "open chatgpt and write a prompt about machine learning", "open notepad and type shopping list: milk, eggs, bread":
            - "type": "open_and_type"
@@ -232,7 +241,7 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
     const config = {
       systemInstruction,
       temperature: 0.1,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 3072,
       responseMimeType: 'application/json',
     };
     if (modelName.includes('preview') || modelName.includes('thinking')) {
@@ -356,6 +365,14 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
         }
       }
     }
+
+    // 4. Fallback repair for unescaped newlines inside multi-line string literals
+    try {
+      const repaired = trimmed.replace(/"((?:[^"\\]|\\.)*)"/gs, (match) => {
+        return match.replace(/\r?\n/g, '\\n');
+      });
+      return JSON.parse(repaired);
+    } catch (_) {}
 
     throw new Error(`Unable to extract valid JSON from response: ${trimmed.slice(0, 100)}...`);
   }
@@ -695,6 +712,89 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
       return '';
     }
     return text;
+  }
+
+  /**
+   * Conducts an autonomous, comprehensive deep research study on a specified topic.
+   * Returns structured JSON with spoken executive summary, executive report, key findings, and full Markdown dossier.
+   *
+   * @param {string} topic - The topic to research
+   * @param {string} [targetApp='Claude'] - Target companion app (Claude or ChatGPT)
+   * @returns {Promise<{ topic: string, target_app: string, executive_spoken_summary: string, executive_summary: string, key_findings: string[], full_dossier_markdown: string }>}
+   */
+  async conductDeepResearch(topic, targetApp = 'Claude') {
+    if (!this.hasApiKey()) {
+      throw new Error('GEMINI_API_KEY is not configured');
+    }
+
+    const cleanTopic = (topic || '').trim();
+    const systemPrompt = `You are a World-Class Principal AI Research Scientist and Technology Analyst.
+Your task is to conduct an authoritative, rigorous, deep-dive research investigation into the specified topic.
+You must produce a comprehensive research dossier and an engaging, articulate executive spoken briefing.
+
+Format your output as valid JSON matching this schema:
+{
+  "topic": "${cleanTopic}",
+  "target_app": "${targetApp}",
+  "executive_spoken_summary": "4-6 articulate, natural spoken sentences (80-120 words) explaining the primary breakthroughs, technical mechanisms, and major real-world impact. Perfect for high-definition voice synthesis.",
+  "executive_summary": "2-3 comprehensive paragraphs providing the strategic executive briefing of the state of the art.",
+  "key_findings": [
+    "Key breakthrough 1 with concrete data/insights",
+    "Key breakthrough 2 with technical mechanisms",
+    "Key breakthrough 3 with industry applications",
+    "Key breakthrough 4 with roadmap & strategic outlook"
+  ],
+  "full_dossier_markdown": "# 🔬 Deep Research Dossier: ${cleanTopic}\\n\\n## 1. Executive Summary & Core Breakthroughs\\n...\\n\\n## 2. Fundamental Architectural & Working Principles\\n...\\n\\n## 3. State-of-the-Art Advances & Recent Milestones\\n...\\n\\n## 4. Real-World Applications & Production Impact\\n...\\n\\n## 5. Critical Bottlenecks, Limitations & Research Frontiers\\n...\\n\\n## 6. Strategic Outlook (Next 3-5 Years)\\n..."
+}`;
+
+    const prompt = `Conduct a comprehensive, deep-dive research investigation on the following topic:
+Topic: "${cleanTopic}"
+Target Companion AI: ${targetApp}
+
+Deliver rigorous technical depth, concrete examples, latest advancements, and strategic clarity.`;
+
+    const contents = [{ role: 'user', parts: [{ text: prompt }] }];
+    const models = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+
+    let lastError = null;
+    for (const model of models) {
+      try {
+        console.log(`[GeminiService] 🔬 Conducting deep research using ${model}...`);
+        const config = {
+          systemInstruction: systemPrompt,
+          temperature: 0.2,
+          maxOutputTokens: 4096,
+          responseMimeType: 'application/json',
+        };
+        if (model.includes('preview') || model.includes('thinking')) {
+          config.thinkingConfig = { thinkingBudget: 0 };
+        }
+
+        const response = await this.ai.models.generateContent({
+          model,
+          contents,
+          config,
+        });
+
+        const raw = response.text ? response.text.trim() : '';
+        const parsed = this.extractJson(raw);
+        if (parsed && (parsed.executive_spoken_summary || parsed.full_dossier_markdown)) {
+          return {
+            topic: parsed.topic || cleanTopic,
+            target_app: parsed.target_app || targetApp,
+            executive_spoken_summary: parsed.executive_spoken_summary || parsed.summary || '',
+            executive_summary: parsed.executive_summary || '',
+            key_findings: Array.isArray(parsed.key_findings) ? parsed.key_findings : [],
+            full_dossier_markdown: parsed.full_dossier_markdown || parsed.full_report_markdown || parsed.report || '',
+          };
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn(`[GeminiService] Deep research attempt with ${model} notice:`, err.message);
+      }
+    }
+
+    throw lastError || new Error('Deep research synthesis failed');
   }
 }
 

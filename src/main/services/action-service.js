@@ -586,6 +586,49 @@ class ActionService {
       .replace(/\s+(please|for me|right now)$/i, '')
       .trim();
 
+    // ─── 00. Background Detailed Deep Research (Claude / ChatGPT) ───────
+    // E.g.: "do a detailed research on quantum computing in claude"
+    //       "research artificial general intelligence in chatgpt"
+    //       "do a detailed research about black holes"
+    //       "conduct deep research on renewable energy"
+    //       "detailed research about solid state batteries in claude"
+    const deepResearchMatch = clean.match(/^(?:do\s+(?:a\s+)?|conduct\s+(?:a\s+)?)?(?:detailed\s+research|deep\s+research|thorough\s+research|extensive\s+research)\s+(?:about|on|into|for)\s+(.+)$/i) ||
+      clean.match(/^(?:research)\s+(?:about|on|into|for)?\s*(.+?)(?:\s+(?:in|on)\s+(claude|chatgpt))?$/i);
+
+    if (deepResearchMatch) {
+      let rawTopic = deepResearchMatch[1].trim();
+      let targetApp = 'Claude';
+
+      // Check if user specifically requested ChatGPT or Claude
+      if (/\b(?:in|on)\s+chatgpt\b/i.test(rawTopic) || deepResearchMatch[2]?.toLowerCase() === 'chatgpt' || /\bchatgpt\b/i.test(clean)) {
+        targetApp = 'ChatGPT';
+        rawTopic = rawTopic.replace(/\s+(?:in|on)\s+chatgpt$/i, '').trim();
+      } else if (/\b(?:in|on)\s+claude\b/i.test(rawTopic) || deepResearchMatch[2]?.toLowerCase() === 'claude' || /\bclaude\b/i.test(clean)) {
+        targetApp = 'Claude';
+        rawTopic = rawTopic.replace(/\s+(?:in|on)\s+claude$/i, '').trim();
+      }
+
+      // Clean topic prefixes
+      const topic = rawTopic
+        .replace(/^(?:about|on|into|for)\s+/i, '')
+        .replace(/\s+in\s+the\s+background$/i, '')
+        .trim();
+
+      if (topic) {
+        const formattedPrompt = this.formatDeepResearchPrompt(topic);
+        const capitalizedTopic = topic.charAt(0).toUpperCase() + topic.slice(1);
+        return {
+          matched: true,
+          type: 'deep_research',
+          app: targetApp,
+          topic: capitalizedTopic,
+          prompt: formattedPrompt,
+          name: `Deep Research: ${capitalizedTopic}`,
+          reply: `Starting detailed research on ${capitalizedTopic} in ${targetApp} in the background! I'll notify you as soon as the research is completed.`,
+        };
+      }
+    }
+
     // ─── 0. Autonomous App Opening & Prompt Writing ──────────────────────
     // E.g.: "open claude and write a prompt about quantum computing"
     //       "open claude and write a prompt in the claude about something"
@@ -1095,6 +1138,32 @@ class ActionService {
   }
 
   /**
+   * Intelligently format a rigorous deep-dive research prompt for Claude or ChatGPT.
+   */
+  formatDeepResearchPrompt(rawTopic) {
+    const topic = (rawTopic || '').trim();
+    return `Please conduct an exhaustive, deep-dive research report on: ${topic}.
+
+Structure your research report thoroughly with:
+1. Executive Summary & Core Breakthroughs
+2. Fundamental Principles, Math/Physics/Architecture & Mechanisms
+3. State of the Art, Key Players & Industry Impact
+4. Current Bottlenecks, Engineering Challenges & Recent Advancements (2025-2026)
+5. Strategic Outlook & Critical Milestones (Next 3-5 Years)
+
+Provide rigorous, deep, analytical explanations with concrete details and data.`;
+  }
+
+  /**
+   * Executes deep research automation in the specified desktop app (Claude / ChatGPT).
+   */
+  async executeDeepResearch(topic, targetApp = 'Claude') {
+    const prompt = this.formatDeepResearchPrompt(topic);
+    console.log(`[ActionService] 🔬 Executing deep research in ${targetApp} for "${topic}"...`);
+    return await this.openAppAndType(targetApp, prompt, true);
+  }
+
+  /**
    * Types or pastes text into the currently active foreground window on Windows.
    * Handles Unicode, emojis, newlines, and quotes without escaping errors.
    */
@@ -1223,6 +1292,14 @@ if (${pressEnter ? 1 : 0} -eq 1) {
     console.log(`[ActionService] 🚀 Executing action: type=${type}, name="${name || ''}"`);
 
     try {
+      // 00. Background Detailed Deep Research Execution
+      if (type === 'deep_research') {
+        const appName = action.app || 'Claude';
+        const topic = action.topic || action.target || '';
+        await this.executeDeepResearch(topic, appName);
+        return true;
+      }
+
       // 0a. Open App & Type Prompt / Write in App (Claude, ChatGPT, Notepad, etc.)
       if (type === 'open_and_type') {
         const appName = action.app || action.target || action.name || 'Claude';

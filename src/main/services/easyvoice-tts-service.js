@@ -102,7 +102,7 @@ class EasyVoiceTTSService {
             'Content-Type': 'application/json',
           },
           responseType: 'arraybuffer',
-          timeout: 7000,
+          timeout: 25000,
         }
       );
 

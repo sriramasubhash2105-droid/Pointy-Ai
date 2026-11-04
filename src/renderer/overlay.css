@@ -1656,3 +1656,275 @@ body {
   background: rgba(255, 45, 85, 0.75);
   animation: dictation-pulse 0.7s ease-out infinite;
 }
+
+/* ─── Background Deep Research Progress Capsule ───────────────────── */
+.research-progress-capsule {
+  position: fixed;
+  top: 24px;
+  right: 28px;
+  z-index: 999990;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(15, 12, 26, 0.88);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  border-radius: 24px;
+  padding: 8px 14px 8px 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 20px rgba(168, 85, 247, 0.25);
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 12.5px;
+  font-weight: 500;
+  pointer-events: auto;
+  user-select: none;
+  animation: capsule-slide-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.25s ease;
+}
+
+.research-progress-capsule.hidden {
+  display: none !important;
+}
+
+.research-capsule-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(168, 85, 247, 0.3);
+  border-top-color: #c084fc;
+  border-radius: 50%;
+  animation: spinner-rotate 0.8s linear infinite;
+}
+
+@keyframes spinner-rotate {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes capsule-slide-in {
+  from { opacity: 0; transform: translateY(-16px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.research-capsule-icon {
+  font-size: 14px;
+}
+
+.research-capsule-text {
+  color: #f1f5f9;
+  letter-spacing: -0.1px;
+}
+
+.research-capsule-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  margin-left: 4px;
+  transition: color 0.15s;
+}
+
+.research-capsule-close:hover {
+  color: #ffffff;
+}
+
+/* ─── Deep Research Dossier Card (Completed) ───────────────────────── */
+.research-dossier-card {
+  position: fixed;
+  top: 32px;
+  right: 32px;
+  width: 480px;
+  max-width: calc(100vw - 64px);
+  max-height: calc(100vh - 64px);
+  z-index: 999995;
+  background: rgba(14, 15, 22, 0.92);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid rgba(226, 27, 27, 0.45);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 35px rgba(226, 27, 27, 0.22);
+  color: #f8fafc;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: auto;
+  user-select: text;
+  animation: dossier-pop-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.research-dossier-card.hidden {
+  display: none !important;
+}
+
+@keyframes dossier-pop-in {
+  from { opacity: 0; transform: translateY(-20px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.dossier-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(226, 27, 27, 0.12) 0%, transparent 100%);
+}
+
+.dossier-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dossier-badge {
+  background: rgba(226, 27, 27, 0.25);
+  border: 1px solid rgba(226, 27, 27, 0.5);
+  color: #ff6b6b;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.dossier-app-tag {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.dossier-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dossier-btn-small {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.dossier-btn-small:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.dossier-btn-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px 6px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.dossier-btn-close:hover {
+  color: #ff4757;
+}
+
+.dossier-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  max-height: calc(100vh - 140px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dossier-topic-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+  line-height: 1.35;
+  letter-spacing: -0.2px;
+}
+
+.dossier-spoken-summary {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid #e21b1b;
+  padding: 10px 12px;
+  border-radius: 0 8px 8px 0;
+}
+
+.dossier-findings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dossier-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #94a3b8;
+}
+
+.dossier-findings-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #e2e8f0;
+}
+
+.dossier-full-report {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #cbd5e1;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 4px;
+}
+
+.dossier-full-report.collapsed {
+  display: none !important;
+}
+
+.dossier-toggle-report {
+  background: rgba(226, 27, 27, 0.15);
+  border: 1px solid rgba(226, 27, 27, 0.35);
+  color: #ff8585;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+  margin-top: 4px;
+}
+
+.dossier-toggle-report:hover {
+  background: rgba(226, 27, 27, 0.28);
+  color: #ffffff;
+  border-color: rgba(226, 27, 27, 0.6);
+}
+

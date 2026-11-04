@@ -63,6 +63,24 @@ const dictationStatusText = document.getElementById('dictation-status-text');
 
 const particlesContainer = document.getElementById('particles');
 
+// Deep Research DOM Elements
+const researchProgressCapsule = document.getElementById('research-progress-capsule');
+const researchCapsuleText = document.getElementById('research-capsule-text');
+const btnDismissResearchCapsule = document.getElementById('btn-dismiss-research-capsule');
+
+const researchDossierCard = document.getElementById('research-dossier-card');
+const dossierAppTag = document.getElementById('dossier-app-tag');
+const dossierTopicTitle = document.getElementById('dossier-topic-title');
+const dossierSpokenSummary = document.getElementById('dossier-spoken-summary');
+const dossierFindingsList = document.getElementById('dossier-findings-list');
+const dossierFullReport = document.getElementById('dossier-full-report');
+const btnToggleFullReport = document.getElementById('btn-toggle-full-report');
+const btnCopyDossier = document.getElementById('btn-copy-dossier');
+const btnOpenResearchApp = document.getElementById('btn-open-research-app');
+const btnCloseDossier = document.getElementById('btn-close-dossier');
+
+let activeResearchData = null;
+
 // ─── State ───────────────────────────────────────────────────────────
 let currentState = 'idle'; // idle | listening | thinking | pointing
 let currentCursorPos = { x: window.innerWidth - 80, y: window.innerHeight - 80 };
@@ -244,6 +262,109 @@ function setupIPCListeners() {
       resetToStandby();
     }, 4000);
   });
+
+  // Deep Research Background Monitoring & Notifications
+  window.pointyAPI?.onDeepResearchStarted?.((data) => {
+    console.log('[Overlay] 🔬 Deep research started:', data);
+    showResearchProgressCapsule(data);
+  });
+
+  window.pointyAPI?.onDeepResearchCompleted?.((data) => {
+    console.log('[Overlay] 🔬 Deep research completed:', data);
+    showDeepResearchCompleted(data);
+  });
+}
+
+// ─── Pleasant Notification Chime (Dual-tone Harmonic Sine Wave) ──────
+function playNotificationChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    // Tone 1: 587.33 Hz (D5)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, now);
+    gain1.gain.setValueAtTime(0.2, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.38);
+
+    // Tone 2: 880 Hz (A5 Harmony)
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880, now + 0.12);
+    gain2.gain.setValueAtTime(0.25, now + 0.12);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.12);
+    osc2.stop(now + 0.65);
+  } catch (e) {
+    console.warn('[Overlay] Notice playing chime:', e);
+  }
+}
+
+function showResearchProgressCapsule(data) {
+  if (researchProgressCapsule && researchCapsuleText) {
+    const app = data?.app || 'Claude';
+    const topic = data?.topic || 'the topic';
+    researchCapsuleText.textContent = `Researching "${topic}" in ${app}...`;
+    researchProgressCapsule.classList.remove('hidden');
+  }
+}
+
+function showDeepResearchCompleted(data) {
+  activeResearchData = data;
+
+  // 1. Hide progress capsule
+  if (researchProgressCapsule) {
+    researchProgressCapsule.classList.add('hidden');
+  }
+
+  // 2. Play delightful futuristic completion chime!
+  playNotificationChime();
+
+  // 3. Pop out the Red AI Cursor to active position with shockwave
+  const cx = Math.min(window.innerWidth - 140, Math.max(140, currentCursorPos.x || window.innerWidth / 2));
+  const cy = Math.min(window.innerHeight - 140, Math.max(140, currentCursorPos.y || window.innerHeight / 3));
+  popOutCursor(cx, cy);
+  spawnParticles(cx, cy, 28);
+
+  // 4. Populate and reveal Research Dossier Card
+  if (researchDossierCard) {
+    if (dossierAppTag) dossierAppTag.textContent = data.app || 'Claude';
+    if (dossierTopicTitle) dossierTopicTitle.textContent = data.topic || 'Detailed Research Dossier';
+    if (dossierSpokenSummary) dossierSpokenSummary.textContent = data.spokenSummary || data.executiveSummary || '';
+
+    if (dossierFindingsList) {
+      dossierFindingsList.innerHTML = '';
+      const findings = Array.isArray(data.keyFindings) ? data.keyFindings : [];
+      for (const item of findings) {
+        const li = document.createElement('li');
+        li.textContent = item;
+        dossierFindingsList.appendChild(li);
+      }
+    }
+
+    if (dossierFullReport) {
+      dossierFullReport.innerHTML = renderMarkdownToHtml(data.reportMarkdown || '');
+      dossierFullReport.classList.add('collapsed');
+    }
+
+    if (btnToggleFullReport) {
+      btnToggleFullReport.textContent = 'View Full Research Report ▾';
+    }
+
+    researchDossierCard.classList.remove('hidden');
+    window.pointyAPI?.setIgnoreMouseEvents(false);
+  }
 }
 
 // ─── Setup Event Listeners ───────────────────────────────────────────
@@ -253,7 +374,7 @@ function setupEventListeners() {
   let isMouseHoveringInteractive = false;
   window.addEventListener('mousemove', (event) => {
     const isInteractive = !!event.target.closest(
-      '#cursor-answer-card, #text-input-container, button, input, .chat-turn, .code-copy-btn, .card-resize-handle'
+      '#cursor-answer-card, #text-input-container, #research-progress-capsule, #research-dossier-card, button, input, .chat-turn, .code-copy-btn, .card-resize-handle'
     );
     if (isInteractive !== isMouseHoveringInteractive) {
       isMouseHoveringInteractive = isInteractive;
@@ -330,6 +451,48 @@ function setupEventListeners() {
     resetToStandby();
   });
 
+  // Deep Research Capsule & Dossier controls
+  btnDismissResearchCapsule?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    researchProgressCapsule?.classList.add('hidden');
+  });
+
+  btnCloseDossier?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    researchDossierCard?.classList.add('hidden');
+    resetToStandby();
+  });
+
+  btnCopyDossier?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const textToCopy = activeResearchData?.reportMarkdown || activeResearchData?.spokenSummary || '';
+    if (textToCopy) {
+      await window.pointyAPI?.copyToClipboard?.(textToCopy);
+      const originalText = btnCopyDossier.textContent;
+      btnCopyDossier.textContent = 'Copied! ✓';
+      setTimeout(() => { btnCopyDossier.textContent = originalText; }, 2000);
+    }
+  });
+
+  btnOpenResearchApp?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const targetApp = activeResearchData?.app || 'Claude';
+    window.pointyAPI?.openResearchApp?.(targetApp);
+  });
+
+  btnToggleFullReport?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!dossierFullReport) return;
+    const isCollapsed = dossierFullReport.classList.contains('collapsed');
+    if (isCollapsed) {
+      dossierFullReport.classList.remove('collapsed');
+      btnToggleFullReport.textContent = 'Hide Research Report ▴';
+    } else {
+      dossierFullReport.classList.add('collapsed');
+      btnToggleFullReport.textContent = 'View Full Research Report ▾';
+    }
+  });
+
   // Start New Chat session button (resets multi-turn chat to fresh state)
   btnNewChat?.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -395,7 +558,9 @@ function setupEventListeners() {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       window.pointyAPI.requestReset();
-      resetToStandby();
+      if (researchDossierCard) researchDossierCard.classList.add('hidden');
+      if (researchProgressCapsule) researchProgressCapsule.classList.add('hidden');
+      resetToStandby({ stopAudio: true });
     }
   });
 }
@@ -438,12 +603,10 @@ function popOutCursor(x, y) {
 }
 
 // ─── Real-time Cursor Following (Tracks user's original cursor) ───────
-function followOriginalCursor(mouseX, mouseY) {
-  if (currentState === 'pointing') {
-    return;
-  }
-  isFollowingMouse = true;
+let pointingArrivedAt = 0;
+let mousePosAtArrival = null;
 
+function followOriginalCursor(mouseX, mouseY) {
   // Smooth companion offset (+16px right, +14px down)
   // Keeps the original OS mouse cursor unobstructed and visible
   const offsetX = 16;
@@ -465,6 +628,35 @@ function followOriginalCursor(mouseX, mouseY) {
 
   targetCursorPos.x = targetX;
   targetCursorPos.y = targetY;
+
+  // If currently pointing at a solution target or displaying an answer:
+  if (currentState === 'pointing') {
+    // 1. While Pointy is flying to target, allow flight transition to finish (~500ms)
+    if (Date.now() < pointingArrivedAt || aiCursor.classList.contains('flying')) {
+      return;
+    }
+
+    // 2. Establish user mouse position anchor once flight arrives at target
+    if (!mousePosAtArrival) {
+      mousePosAtArrival = { x: mouseX, y: mouseY };
+      return;
+    }
+
+    // 3. Detect if user has resumed moving their physical mouse (>24px from arrival anchor)
+    const dist = Math.hypot(mouseX - mousePosAtArrival.x, mouseY - mousePosAtArrival.y);
+    const isOverInteractiveCard = !!document.querySelector('#cursor-answer-card:not(.hidden):hover');
+    if (!isOverInteractiveCard && dist > 24) {
+      console.log('[Pointy] 🖱️ User resumed mouse movement during answer -> returning to companion follow');
+      mousePosAtArrival = null;
+      // Smoothly release from target and rejoin user cursor without cutting off active speech
+      resetToStandby({ stopAudio: false });
+      return;
+    }
+
+    return;
+  }
+
+  isFollowingMouse = true;
 
   // If first position, snap instantly so it doesn't fly from off-screen
   if (currentRenderPos.x < 0) {
@@ -1294,8 +1486,8 @@ function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = fals
   if (bubbleCursor) bubbleCursor.classList.remove('hidden');
   positionBubbleAtCursor();
 
-  // Character typing cadence: ~26ms per character for continuous, natural typing
-  const charDelay = 26;
+  // Character typing cadence: fast for long explanations, natural for short text
+  const charDelay = text.length > 250 ? 12 : (text.length > 100 ? 18 : 26);
 
   activeTypingTimer = setInterval(() => {
     if (charIdx < text.length) {
@@ -1322,11 +1514,17 @@ function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = fals
       }
       positionBubbleAtCursor();
 
-      // Hold bubble on screen: if intermediate step waiting for user click, hold for 35s
+      // Hold bubble on screen: if audio is actively speaking, DO NOT DISMISS!
+      // Audio onended handler will gracefully schedule dismissal after speech completes.
+      if (activeAudio && !activeAudio.paused && !activeAudio.ended) {
+        return;
+      }
+
       const isIntermediate = activeMultiStepInfo && !activeMultiStepInfo.isFinalStep;
-      const holdDuration = isIntermediate ? 35000 : 8500;
+      const holdDuration = isIntermediate ? 30000 : 4500;
       if (answerDismissTimer) clearTimeout(answerDismissTimer);
       answerDismissTimer = setTimeout(() => {
+        if (activeAudio && !activeAudio.paused && !activeAudio.ended) return;
         resetToStandby();
       }, holdDuration);
     }
@@ -1353,7 +1551,7 @@ function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = fals
       positionBubbleAtCursor();
 
       const isIntermediate = activeMultiStepInfo && !activeMultiStepInfo.isFinalStep;
-      const holdDuration = isIntermediate ? 35000 : 8500;
+      const holdDuration = isIntermediate ? 30000 : 4500;
       if (answerDismissTimer) clearTimeout(answerDismissTimer);
       answerDismissTimer = setTimeout(() => {
         resetToStandby();
@@ -1536,8 +1734,9 @@ function setupCardResize() {
 function renderSingleAnswer(result, question) {
   removeThinkingTurn();
 
-  // Floating card speech bubble: show PURE text only (no continue chat, no new chat)
   const spoken = (result.reply || (result.detailed_explanation ? result.detailed_explanation.split('\n')[0] : '')).trim();
+  const detailed = (result.detailed_explanation || '').trim();
+  const hasExtra = !!(detailed && detailed !== spoken && detailed.length > spoken.length + 10);
   const isMultiStep = !!(result.multi_step || (result.step_index && result.step_index > 1));
   const multiStep = isMultiStep ? {
     stepIndex: result.step_index || 1,
@@ -1548,7 +1747,7 @@ function renderSingleAnswer(result, question) {
     stepLabel: (result.steps && result.steps[0]) ? result.steps[0].label : '',
   } : null;
 
-  typeOutSpeechBubble(spoken, '', false, false, multiStep);
+  typeOutSpeechBubble(spoken, detailed, hasExtra, false, multiStep);
 }
 
 /**
@@ -1732,6 +1931,9 @@ function handlePointAt(result, audioBase64 = null, conversation = null, question
     showAnswerBesideCursor(fallbackText, null, isChatModeActive);
     if (audioBase64) {
       playAudioBase64(audioBase64, isChatModeActive);
+    } else {
+      if (answerDismissTimer) clearTimeout(answerDismissTimer);
+      answerDismissTimer = setTimeout(() => resetToStandby(), 4000);
     }
     return;
   }
@@ -1745,11 +1947,16 @@ function handlePointAt(result, audioBase64 = null, conversation = null, question
     currentSteps = [];
     currentStepIndex = 0;
     setAppState('pointing');
+    pointingArrivedAt = Date.now() + 100;
+    mousePosAtArrival = null;
     if (result.mode === 'action') {
       spawnParticles(currentCursorPos.x, currentCursorPos.y, 20);
     }
     if (audioBase64) {
       playAudioBase64(audioBase64, isChatModeActive);
+    } else if (!isChatModeActive) {
+      if (answerDismissTimer) clearTimeout(answerDismissTimer);
+      answerDismissTimer = setTimeout(() => resetToStandby(), 4500);
     }
     if (!isChatModeActive) {
       positionBubbleAtCursor();
@@ -1796,17 +2003,20 @@ function pointToStep(index, fullText = null, audioBase64 = null, isChat = false,
   currentTilt = 0;
 
   setAppState('pointing');
+  pointingArrivedAt = Date.now() + 540;
+  mousePosAtArrival = null;
 
   // 2. Play TTS speech as cursor points!
   if (audioBase64) {
     playAudioBase64(audioBase64, isChat);
   } else {
     if (!isChat) {
+      if (answerDismissTimer) clearTimeout(answerDismissTimer);
       answerDismissTimer = setTimeout(() => {
         if (currentState === 'pointing') {
           resetToStandby();
         }
-      }, 7500);
+      }, 4500);
     }
   }
 
@@ -1885,11 +2095,12 @@ function playAudioBase64(base64, isChat = false) {
       if (speakingIndicator) speakingIndicator.style.opacity = '0.3';
 
       if (!isChat) {
+        if (answerDismissTimer) clearTimeout(answerDismissTimer);
         answerDismissTimer = setTimeout(() => {
           if (currentState === 'pointing') {
             resetToStandby();
           }
-        }, 7000);
+        }, 2800);
       }
     };
 
@@ -1902,16 +2113,25 @@ function playAudioBase64(base64, isChat = false) {
 }
 
 // ─── Reset to Standby (Follows cursor continuously) ──────────────────
-function resetToStandby() {
+function resetToStandby(options = {}) {
+  const stopAudio = options.stopAudio !== false;
   cancelStandbyGlide();
   if (answerDismissTimer) {
     clearTimeout(answerDismissTimer);
     answerDismissTimer = null;
   }
 
+  pointingArrivedAt = 0;
+  mousePosAtArrival = null;
+
   const wasPointing = (currentState === 'pointing');
   currentState = 'idle';
   isFollowingMouse = true;
+
+  // Notify main process immediately so appState is idle and mouse tracking stays active!
+  try {
+    window.pointyAPI?.pointingComplete?.();
+  } catch (_) {}
 
   // Reset multi-turn chat session state and manual resize overrides
   isChatModeActive = false;
@@ -1923,7 +2143,7 @@ function resetToStandby() {
   cursorAnswerCard.style.height = '';
   cursorAnswerCard.classList.remove('chat-mode', 'size-compact', 'size-medium', 'size-expanded', 'manually-resized', 'assistant-mode', 'is-speaking', 'details-open');
 
-  if (activeAudio) {
+  if (stopAudio && activeAudio) {
     activeAudio.pause();
     activeAudio = null;
   }
@@ -1959,7 +2179,8 @@ function resetToStandby() {
     targetCursorPos.x = targetX;
     targetCursorPos.y = targetY;
 
-    if (wasPointing) {
+    const distToTarget = Math.hypot(targetX - currentRenderPos.x, targetY - currentRenderPos.y);
+    if (wasPointing && distToTarget > 35) {
       // Smooth cinematic return glide back to user's cursor
       aiCursor.classList.remove('following', 'listening', 'thinking', 'pointing');
       aiCursor.classList.add('flying');
@@ -1970,14 +2191,16 @@ function resetToStandby() {
       setTimeout(() => {
         aiCursor.classList.remove('flying');
         aiCursor.classList.add('idle', 'following');
-        currentRenderPos.x = targetX;
-        currentRenderPos.y = targetY;
+        currentRenderPos.x = targetCursorPos.x;
+        currentRenderPos.y = targetCursorPos.y;
         currentTilt = 0;
         if (!isLerpLoopRunning) startLerpLoop();
-      }, 420);
+      }, 400);
     } else {
       aiCursor.classList.remove('flying', 'listening', 'thinking', 'pointing');
       aiCursor.classList.add('idle', 'following');
+      currentRenderPos.x = targetX;
+      currentRenderPos.y = targetY;
       if (!isLerpLoopRunning) startLerpLoop();
     }
   }).catch(() => {});

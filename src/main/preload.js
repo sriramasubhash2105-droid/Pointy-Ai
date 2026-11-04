@@ -55,7 +55,11 @@ contextBridge.exposeInMainWorld('pointyAPI', {
   cancelMultiStep: () => ipcRenderer.invoke('cancel-multi-step'),
   onMultiStepWaiting: (callback) => ipcRenderer.on('multi-step-waiting', (_, data) => callback(data)),
   onMultiStepLoading: (callback) => ipcRenderer.on('multi-step-loading', (_, data) => callback(data)),
-  onMultiStepError: (callback) => ipcRenderer.on('multi-step-error', (_, data) => callback(data)),
+  // Deep Research Background Monitoring & Notifications
+  onDeepResearchStarted: (callback) => ipcRenderer.on('deep-research-started', (_, data) => callback(data)),
+  onDeepResearchCompleted: (callback) => ipcRenderer.on('deep-research-completed', (_, data) => callback(data)),
+  openResearchApp: (app) => ipcRenderer.invoke('open-research-app', app),
+  copyToClipboard: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
 });
 
 // Full ChatGPT Desktop Application API
