@@ -12,6 +12,14 @@ function logToFile(msg) {
   } catch (_) {}
 }
 
+process.on('uncaughtException', (err) => {
+  logToFile(`⚠️ Caught unexpected exception: ${err.message}\n${err.stack}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logToFile(`⚠️ Unhandled Promise Rejection: ${reason}`);
+});
+
 // Load environment variables from .env file if present
 function loadEnv() {
   const envPath = path.join(__dirname, '../../.env');
@@ -43,12 +51,14 @@ loadEnv();
 
 const { GnaniService } = require('./services/gnani-service');
 const { GeminiService } = require('./services/gemini-service');
-const { AssemblyAIService } = require('./services/assemblyai-service');
-const { GoogleTTSService } = require('./services/google-tts-service');
-const { EasyVoiceTTSService } = require('./services/easyvoice-tts-service');
 const { ConversationManager } = require('./services/conversation-manager');
 const { MouseWatcherService } = require('./services/mouse-watcher-service');
 const { ActionService } = require('./services/action-service');
+
+let GlobalKeyboardListener = null;
+try {
+  GlobalKeyboardListener = require('node-global-key-listener').GlobalKeyboardListener;
+} catch (_) {}
 
 // Ensure single instance to prevent hotkey conflicts
 const gotTheLock = app.requestSingleInstanceLock();
@@ -73,24 +83,26 @@ if (!gotTheLock) {
 let overlayWindow = null;
 let chatAppWindow = null;
 let tray = null;
-let assemblyaiService = null;
 let gnaniService = null;
 let geminiService = null;
-let googleTtsService = null;
 let conversationManager = null;
 let mouseWatcherService = null;
 let actionService = null;
 let appState = 'idle'; // idle | listening | thinking | pointing
 
+// Live real-time STT & Push-to-Talk session tracking
+let activeLiveSttSession = null;
+let activeSttTranscript = '';
+let hasProcessedCurrentTurn = false;
+let keyboardListener = null;
+let pttDownTime = 0;
+
 // ─── App Configuration ───────────────────────────────────────────────
 const CONFIG = {
   hotkey: 'Alt+C',
-  assemblyaiApiKey: process.env.ASSEMBLYAI_API_KEY || '',
   gnaniApiKey: process.env.GNANI_API_KEY || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-3-flash-preview',
-  easyVoiceApiKey: process.env.EASYVOICE_API_KEY || '',
-  googleTtsApiKey: process.env.GOOGLE_TTS_API_KEY || process.env.GEMINI_API_KEY || '',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
 };
 
 // ─── Create the Pointy AI Desktop Application Window ─────────────────
@@ -351,6 +363,51 @@ function registerHotkeys() {
   }
 }
 
+// ─── Push-to-Talk (Hold Alt+C or F8 to speak, release to send immediately with 0ms silence lag) ───
+function setupPushToTalk() {
+  if (!GlobalKeyboardListener) return;
+  try {
+    keyboardListener = new GlobalKeyboardListener();
+    keyboardListener.addListener((e, down) => {
+      const isAltCDown = (e.name === 'C' && (down['LEFT ALT'] || down['RIGHT ALT']));
+      const isF8Down = (e.name === 'F8');
+
+      if (e.state === 'DOWN') {
+        if (isAltCDown || isF8Down) {
+          if (appState === 'idle') {
+            pttDownTime = Date.now();
+            logToFile(`🎙️ Push-to-Talk down (${e.name}) -> starting live voice capture...`);
+            handleHotkeyPress();
+          }
+        }
+      } else if (e.state === 'UP') {
+        const isTriggerKeyUp = (e.name === 'C' || e.name === 'F8' || e.name === 'LEFT ALT' || e.name === 'RIGHT ALT');
+        if (isTriggerKeyUp && pttDownTime > 0) {
+          const holdDuration = Date.now() - pttDownTime;
+          pttDownTime = 0;
+          if (holdDuration >= 350 && (appState === 'listening' || appState === 'dictating')) {
+            logToFile(`⚡ Push-to-Talk key released after ${holdDuration}ms -> instant 0ms silence cutoff!`);
+            if (appState === 'listening') {
+              appState = 'thinking';
+              overlayWindow?.webContents.send('state-change', 'thinking');
+              overlayWindow?.webContents.send('stop-recording');
+              activeLiveSttSession?.finishWithSilence();
+            } else if (appState === 'dictating') {
+              appState = 'transcribing_dictation';
+              overlayWindow?.webContents.send('state-change', 'transcribing_dictation');
+              overlayWindow?.webContents.send('stop-recording');
+              activeLiveSttSession?.finishWithSilence();
+            }
+          }
+        }
+      }
+    });
+    logToFile('⚡ Push-to-Talk global keyboard listener active (0ms release cutoff)');
+  } catch (err) {
+    logToFile(`Push-to-Talk init notice: ${err.message}`);
+  }
+}
+
 // ─── Real-time Cursor Tracking (Follows cursor continuously when not pointing) ──
 let mouseTrackInterval = null;
 let lastCursorPos = { x: -1, y: -1 };
@@ -386,6 +443,7 @@ async function handleHotkeyPress() {
     appState = 'thinking';
     overlayWindow?.webContents.send('state-change', 'thinking');
     overlayWindow?.webContents.send('stop-recording');
+    activeLiveSttSession?.finishWithSilence();
     return;
   }
 
@@ -403,7 +461,37 @@ async function handleHotkeyPress() {
 
   // Start listening and continuously follow user's original cursor!
   appState = 'listening';
+  hasProcessedCurrentTurn = false;
+  activeSttTranscript = '';
   startMouseTracking();
+  gnaniService?.prewarmSTT();
+
+  if (activeLiveSttSession) {
+    try { activeLiveSttSession.close(); } catch (_) {}
+    activeLiveSttSession = null;
+  }
+  if (gnaniService && gnaniService.hasApiKey()) {
+    gnaniService.prewarmTTS();
+    try {
+      activeLiveSttSession = gnaniService.createLiveStreamingSession({
+        languageCode: 'en-IN',
+        onTranscript: (text, isFinal) => {
+          if (!text) return;
+          activeSttTranscript = text;
+          overlayWindow?.webContents.send('transcript', { text, lang: 'en-IN', isPartial: !isFinal });
+          if (isFinal && !hasProcessedCurrentTurn) {
+            hasProcessedCurrentTurn = true;
+            logToFile(`⚡ Final live STT transcript: "${text}"`);
+            processLiveQuestion(text, 'en-IN');
+          }
+        },
+        onError: (err) => logToFile(`Live STT session notice: ${err.message}`),
+      });
+    } catch (sttErr) {
+      logToFile(`Live STT init notice: ${sttErr.message}`);
+    }
+  }
+
   overlayWindow?.webContents.send('state-change', 'listening');
   overlayWindow?.webContents.send('start-recording');
 }
@@ -415,6 +503,7 @@ async function handleDictationToggle() {
     appState = 'transcribing_dictation';
     overlayWindow?.webContents.send('state-change', 'transcribing_dictation');
     overlayWindow?.webContents.send('stop-recording');
+    activeLiveSttSession?.finishWithSilence();
     return;
   }
 
@@ -427,7 +516,36 @@ async function handleDictationToggle() {
   console.log(`[Pointy] 🎙️ Starting Voice Dictation at (${cursorPoint.x}, ${cursorPoint.y})`);
 
   appState = 'dictating';
+  hasProcessedCurrentTurn = false;
+  activeSttTranscript = '';
   startMouseTracking();
+  gnaniService?.prewarmSTT();
+
+  if (activeLiveSttSession) {
+    try { activeLiveSttSession.close(); } catch (_) {}
+    activeLiveSttSession = null;
+  }
+  if (gnaniService && gnaniService.hasApiKey()) {
+    try {
+      activeLiveSttSession = gnaniService.createLiveStreamingSession({
+        languageCode: 'en-IN',
+        onTranscript: (text, isFinal) => {
+          if (!text) return;
+          activeSttTranscript = text;
+          overlayWindow?.webContents.send('transcript', { text, lang: 'en-IN', isPartial: !isFinal });
+          if (isFinal && !hasProcessedCurrentTurn) {
+            hasProcessedCurrentTurn = true;
+            logToFile(`⚡ Final dictation live STT transcript: "${text}"`);
+            processDictation(text);
+          }
+        },
+        onError: (err) => logToFile(`Live STT dictation notice: ${err.message}`),
+      });
+    } catch (sttErr) {
+      logToFile(`Live STT dictation init notice: ${sttErr.message}`);
+    }
+  }
+
   overlayWindow?.webContents.send('start-dictation', cursorPoint);
   overlayWindow?.webContents.send('state-change', 'dictating');
   overlayWindow?.webContents.send('start-recording');
@@ -447,37 +565,13 @@ async function processDictation(input) {
       transcript = input.trim();
       logToFile(`⚡ Dictation: Instant transcript received from Web Speech: "${transcript}"`);
     } else if (Buffer.isBuffer(input)) {
-      // ⚡ Path 2: Audio buffer fallback (~1.5s via Gemini 3.5 Flash Lite)
-      logToFile(`🎙️ Dictation: Transcribing voice buffer (${input.length} bytes)...`);
-
-      // Try Gemini 3.5 Flash STT (~2s)
-      if (geminiService && geminiService.hasApiKey()) {
-        try {
-          const res = await geminiService.transcribeAudio(input);
-          const cand = (res?.transcript || '').trim();
-          if (cand && !/^(\d{1,2}:)?\d{1,2}(:\d{2})?$/.test(cand) && !/^[0-9:\s.]+$/.test(cand)) {
-            transcript = cand;
-            logToFile(`⚡ Dictation transcribed via Gemini in ${Date.now() - startTime}ms: "${transcript}"`);
-          } else {
-            logToFile(`⚠️ Gemini returned timestamp or empty ("${cand}"), falling back to AssemblyAI (universal-2)...`);
-          }
-        } catch (gemErr) {
-          logToFile(`⚠️ Gemini STT failed (${gemErr.message}), falling back to AssemblyAI/Gnani...`);
-        }
-      }
-
-      // Fallback to AssemblyAI (universal-2) if Gemini was empty, timestamped, or errored
-      if (!transcript) {
-        if (assemblyaiService && assemblyaiService.hasApiKey()) {
-          logToFile('🎙️ Dictation: Transcribing with AssemblyAI (universal-2)...');
-          const res = await assemblyaiService.transcribe(input);
-          transcript = (res?.transcript || '').trim();
-          logToFile(`🎯 Dictation transcribed via AssemblyAI in ${Date.now() - startTime}ms: "${transcript}"`);
-        } else if (gnaniService && gnaniService.hasApiKey()) {
-          logToFile('🎙️ Dictation: Transcribing with Gnani fallback...');
-          const res = await gnaniService.transcribe(input);
-          transcript = (res?.transcript || '').trim();
-        }
+      logToFile(`🎙️ Dictation: Transcribing voice buffer (${input.length} bytes) with Gnani Prisma STT...`);
+      if (gnaniService && gnaniService.hasApiKey()) {
+        const res = await gnaniService.transcribe(input);
+        transcript = (res?.transcript || '').trim();
+        logToFile(`🎯 Dictation transcribed via Gnani Prisma in ${Date.now() - startTime}ms: "${transcript}"`);
+      } else {
+        logToFile('⚠️ Gnani STT key missing (configure GNANI_API_KEY in .env)');
       }
     }
 
@@ -512,15 +606,53 @@ async function processDictation(input) {
   }
 }
 
+// ─── Process Question from Live Real-Time STT Stream ──────────────────
+async function processLiveQuestion(transcript, language = 'en-IN') {
+  try {
+    appState = 'thinking';
+    overlayWindow?.webContents.send('state-change', 'thinking');
+
+    const cleanText = (transcript || '').trim();
+    if (!cleanText) {
+      overlayWindow?.webContents.send('error', "I didn't catch that. Please ask again or press Alt+T to type!");
+      setTimeout(() => {
+        if (appState === 'thinking') resetState();
+      }, 4000);
+      return;
+    }
+
+    logToFile(`💬 Live STT Question: "${cleanText}" (${language})`);
+    overlayWindow?.webContents.send('transcript', { text: cleanText, lang: language, isFinal: true });
+
+    // ⚡ Fast-path desktop action check (<5ms zero-latency response)
+    const localAction = actionService?.matchLocalIntent(cleanText);
+    if (localAction) {
+      logToFile(`⚡ Fast-path action matched: "${localAction.name}" (${localAction.type})`);
+      await executeDesktopAction(localAction, cleanText, language);
+      return;
+    }
+
+    // Capture screen and analyze with Gemini
+    const screenshotBuffer = await captureScreenBuffer();
+    await analyzeAndPoint(screenshotBuffer, cleanText, language);
+
+  } catch (error) {
+    logToFile(`❌ Error processing live question: ${error.message}`);
+    overlayWindow?.webContents.send('error', error.message);
+    setTimeout(() => {
+      if (appState === 'thinking') resetState();
+    }, 4500);
+  }
+}
+
 // ─── Screen Capture Engine (Hardware Accelerated with Fallback) ───────
 async function captureScreenBuffer() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.size;
 
-  // Ultra-fast optimized capture: downscale to 1280px max dimension and 72% JPEG quality.
-  // Reduces payload from ~780KB to ~110KB (85% reduction), cutting network upload
-  // and Gemini vision tokenization time by ~40% while preserving 100% pointing precision!
-  const maxDim = 1280;
+  // Ultra-fast single-tile vision capture: downscale to 1024px max dimension and 70% JPEG quality.
+  // Reduces payload from ~780KB to ~85KB, cutting network upload and Gemini vision tokenization time!
+  const maxDim = 1024;
   let targetWidth = width;
   let targetHeight = height;
   if (width > maxDim) {
@@ -545,7 +677,7 @@ async function captureScreenBuffer() {
       const screenSource = sources.find((s) => s.id.includes('0:0') || s.name.toLowerCase().includes('entire') || s.name.toLowerCase().includes('screen 1')) || sources[0];
       const img = screenSource.thumbnail;
       if (!img.isEmpty()) {
-        const jpegBuf = img.toJPEG(72);
+        const jpegBuf = img.toJPEG(70);
         if (jpegBuf && jpegBuf.length > 1000) {
           logToFile(`📸 Screen captured via desktopCapturer (${jpegBuf.length} bytes, ${targetWidth}x${targetHeight})`);
           try {
@@ -609,9 +741,9 @@ async function startDeepResearchWorkflow(action, language = 'en-US') {
     question: `Research ${topic}`,
   });
 
-  // Speak initial confirmation aloud
-  if (googleTtsService) {
-    googleTtsService.speak(replyText, language).then((audioBase64) => {
+  // Speak initial confirmation aloud via Gnani Timbre
+  if (gnaniService && gnaniService.hasApiKey()) {
+    gnaniService.speak(replyText, language).then((audioBase64) => {
       if (audioBase64 && appState === 'pointing') {
         overlayWindow?.webContents.send('play-audio', audioBase64);
       }
@@ -717,12 +849,12 @@ async function startDeepResearchWorkflow(action, language = 'en-US') {
     overlayWindow?.show();
     overlayWindow?.moveTop();
 
-    // Synthesize spoken reminder using EasyVoice TTS Kokoro-82M!
-    if (googleTtsService) {
+    // Synthesize spoken reminder using Gnani Timbre TTS!
+    if (gnaniService && gnaniService.hasApiKey()) {
       const speechPrompt = `Subhash, your detailed research on ${topic} in ${targetApp} is complete! ${spokenSummary}`;
       try {
         const cleanSpeech = speechPrompt.replace(/[*_#`~\[\]]/g, '').trim();
-        const audioBase64 = await googleTtsService.speak(cleanSpeech, language);
+        const audioBase64 = await gnaniService.speak(cleanSpeech, language);
         if (audioBase64) {
           overlayWindow?.webContents.send('play-audio', audioBase64);
         }
@@ -779,9 +911,13 @@ async function executeDesktopAction(action, question, language = 'en-US') {
   overlayWindow?.webContents.send('conversation-updated', { conversation: activeConv });
   chatAppWindow?.webContents.send('conversation-updated', { conversation: activeConv });
 
-  // 5. Synthesize speech concurrently in background and play as soon as ready!
-  if (googleTtsService) {
-    googleTtsService.speak(replyText, language).then((audioBase64) => {
+  // 5. Synthesize speech concurrently in background and stream chunks as soon as ready!
+  if (gnaniService && gnaniService.hasApiKey()) {
+    gnaniService.speak(replyText, language, (chunkBase64, isFirst) => {
+      if (isFirst) overlayWindow?.webContents.send('play-audio-start');
+      overlayWindow?.webContents.send('play-audio-chunk', chunkBase64);
+    }).then((audioBase64) => {
+      overlayWindow?.webContents.send('play-audio-complete');
       if (audioBase64 && appState === 'pointing') {
         overlayWindow?.webContents.send('play-audio', audioBase64);
       }
@@ -801,23 +937,11 @@ async function processQuestion(audioBuffer) {
     const [screenshotBuffer, sttResult] = await Promise.all([
       captureScreenBuffer(),
       (async () => {
-        if (geminiService && geminiService.hasApiKey()) {
-          try {
-            logToFile(`🎙️ Transcribing audio (${audioBuffer?.length || 0} bytes) with Gemini 3.5 Flash Lite...`);
-            const gRes = await geminiService.transcribeAudio(audioBuffer);
-            if (gRes && gRes.transcript) return gRes;
-          } catch (gErr) {
-            logToFile(`⚠️ Gemini STT query fallback: ${gErr.message}`);
-          }
-        }
-        if (assemblyaiService && assemblyaiService.hasApiKey()) {
-          logToFile(`🎙️ Transcribing audio (${audioBuffer?.length || 0} bytes) with AssemblyAI...`);
-          return await assemblyaiService.transcribe(audioBuffer);
-        } else if (gnaniService && gnaniService.hasApiKey()) {
-          logToFile(`🎙️ Transcribing audio with Gnani Prisma...`);
+        if (gnaniService && gnaniService.hasApiKey()) {
+          logToFile(`🎙️ Transcribing audio (${audioBuffer?.length || 0} bytes) with Gnani Prisma STT...`);
           return await gnaniService.transcribe(audioBuffer);
         } else {
-          logToFile('⚠️ No STT API key — using demo question');
+          logToFile('⚠️ No Gnani STT API key configured — using demo question');
           return { transcript: 'Where is the settings button?', language: 'en-US' };
         }
       })(),
@@ -974,7 +1098,10 @@ async function advanceMultiStep() {
       height: primaryDisplay.size.height,
     };
 
-    // 3. Ask Gemini for this step (evaluates whether goal is reached or next intermediate step needed)
+    // 3. Ask Gemini for this step (prewarm TTS WebSocket in parallel)
+    if (gnaniService && gnaniService.hasApiKey()) {
+      gnaniService.prewarmTTS();
+    }
     const resultNext = await geminiService.analyzeNextStep(
       newScreenshot,
       goal,
@@ -992,18 +1119,7 @@ async function advanceMultiStep() {
     conversationManager?.addMessage('assistant', resultNext);
     const activeConv = conversationManager ? conversationManager.getActiveConversation() : null;
 
-    // 4. Synthesize speech for this step
-    const spokenSentence = googleTtsService ? googleTtsService.extractFirstSentence(resultNext.reply) : resultNext.reply;
-    let audioBase64 = null;
-    if (spokenSentence && googleTtsService && googleTtsService.hasApiKey()) {
-      try {
-        audioBase64 = await googleTtsService.speak(spokenSentence, resultNext.reply_lang || language);
-      } catch (ttsErr) {
-        logToFile(`TTS step ${nextStepIndex} error: ${ttsErr.message}`);
-      }
-    }
-
-    // 5. Check if MORE steps remain or if this is the final target!
+    // 4. Check if MORE steps remain or if this is the final target!
     const isContinuing = !!resultNext.multi_step && !resultNext.is_final_step && nextStepIndex < 7;
 
     if (isContinuing && resultNext.steps && resultNext.steps.length > 0) {
@@ -1024,16 +1140,30 @@ async function advanceMultiStep() {
       clearMultiStep();
     }
 
-    // 6. Point to the element on the newly updated screen!
+    // 5. Point to the element on the newly updated screen IMMEDIATELY (0ms UI wait!)
     appState = 'pointing';
     overlayWindow?.moveTop();
     overlayWindow?.webContents.send('state-change', 'pointing');
     overlayWindow?.webContents.send('point-at', {
       result: resultNext,
-      audioBase64,
+      audioBase64: null,
       conversation: activeConv,
       question: goal,
     });
+
+    // 6. Synthesize speech in parallel and stream audio chunks as soon as ready
+    const spokenSentence = gnaniService ? gnaniService.extractFirstSentence(resultNext.reply) : resultNext.reply;
+    if (spokenSentence && gnaniService && gnaniService.hasApiKey()) {
+      gnaniService.speak(spokenSentence, resultNext.reply_lang || language, (chunkBase64, isFirst) => {
+        if (isFirst) overlayWindow?.webContents.send('play-audio-start');
+        overlayWindow?.webContents.send('play-audio-chunk', chunkBase64);
+      }).then((audioBase64) => {
+        overlayWindow?.webContents.send('play-audio-complete');
+        if (audioBase64) overlayWindow?.webContents.send('play-audio', audioBase64);
+      }).catch((ttsErr) => {
+        logToFile(`TTS step ${nextStepIndex} error: ${ttsErr.message}`);
+      });
+    }
 
   } catch (err) {
     logToFile(`❌ Multi-step advance error: ${err.message}`);
@@ -1086,6 +1216,9 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
 
   if (geminiService.hasApiKey()) {
     logToFile(`🧠 Asking Gemini model for: "${question}" (history turns: ${conversationHistory.length})`);
+    if (gnaniService && gnaniService.hasApiKey()) {
+      gnaniService.prewarmTTS();
+    }
     result = await geminiService.analyzeScreen(screenshotBuffer, question, language, displayInfo, conversationHistory);
     logToFile(`✅ Gemini response: mode=${result.mode}, found=${result.found}, reply="${result.reply}", steps=${result.steps?.length || 0}`);
   } else {
@@ -1119,8 +1252,8 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
     (result.reply && result.reply.length > 120);
 
   let textToSpeak = result.reply || '';
-  if (!isExplanation && googleTtsService && typeof googleTtsService.extractFirstSentence === 'function') {
-    textToSpeak = googleTtsService.extractFirstSentence(result.reply);
+  if (!isExplanation && gnaniService && typeof gnaniService.extractFirstSentence === 'function') {
+    textToSpeak = gnaniService.extractFirstSentence(result.reply);
   }
 
   // Clean Markdown formatting for silky smooth TTS speech
@@ -1128,17 +1261,6 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
     .replace(/[*_#`~\[\]]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-
-  let audioBase64 = null;
-  if (textToSpeak && googleTtsService) {
-    logToFile(`🔊 Synthesizing speech (${isExplanation ? 'FULL DETAILED EXPLANATION' : 'Concise'}): "${textToSpeak.slice(0, 60)}..."`);
-    try {
-      audioBase64 = await googleTtsService.speak(textToSpeak, result.reply_lang || language);
-      logToFile(`🔊 TTS synthesis complete (${audioBase64 ? audioBase64.length : 0} bytes base64)`);
-    } catch (ttsErr) {
-      logToFile(`⚠️ TTS error: ${ttsErr.message}`);
-    }
-  }
 
   // 4. Handle multi-step guidance if target requires opening menus/settings first
   if (result.multi_step && !result.is_final_step && result.steps && result.steps.length > 0) {
@@ -1156,11 +1278,28 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
     clearMultiStep();
   }
 
-  // Point at the target elements and start speaking simultaneously as cursor begins moving!
+  // 5. Point at the target elements IMMEDIATELY (zero visual latency!)
   appState = 'pointing';
   overlayWindow?.moveTop();
   overlayWindow?.webContents.send('state-change', 'pointing');
-  overlayWindow?.webContents.send('point-at', { result, audioBase64, conversation: activeConv, question });
+  overlayWindow?.webContents.send('point-at', { result, audioBase64: null, conversation: activeConv, question });
+
+  // 6. Synthesize speech in parallel and stream audio directly to overlay as chunks arrive
+  if (textToSpeak && gnaniService && gnaniService.hasApiKey()) {
+    logToFile(`🔊 Streaming TTS speech via Gnani Timbre (${isExplanation ? 'FULL DETAILED EXPLANATION' : 'Concise'}): "${textToSpeak.slice(0, 60)}..."`);
+    gnaniService.speak(textToSpeak, result.reply_lang || language, (chunkBase64, isFirst) => {
+      if (isFirst) overlayWindow?.webContents.send('play-audio-start');
+      overlayWindow?.webContents.send('play-audio-chunk', chunkBase64);
+    }).then((audioBase64) => {
+      overlayWindow?.webContents.send('play-audio-complete');
+      if (audioBase64) {
+        logToFile(`🔊 Gnani TTS complete (${audioBase64.length} bytes base64)`);
+        overlayWindow?.webContents.send('play-audio', audioBase64);
+      }
+    }).catch((ttsErr) => {
+      logToFile(`⚠️ Gnani TTS error: ${ttsErr.message}`);
+    });
+  }
 }
 
 // ─── Demo response when no API key is set ────────────────────────────
@@ -1271,6 +1410,14 @@ function getDemoResponse(question) {
 // ─── Reset to idle state ─────────────────────────────────────────────
 function resetState() {
   clearMultiStep();
+  if (activeLiveSttSession) {
+    try { activeLiveSttSession.close(); } catch (_) {}
+    activeLiveSttSession = null;
+  }
+  hasProcessedCurrentTurn = false;
+  activeSttTranscript = '';
+  gnaniService?.closePrewarmedSTT();
+  gnaniService?.closePrewarmedTTS();
   appState = 'idle';
   startMouseTracking();
   overlayWindow?.webContents.send('state-change', 'idle');
@@ -1319,8 +1466,38 @@ function setupIPC() {
     return screen.getCursorScreenPoint();
   });
 
-  // Receive recorded audio from renderer
+  // Live real-time audio chunk streaming directly to STT WebSocket session
+  ipcMain.on('live-audio-chunk', (event, chunkBase64) => {
+    if (activeLiveSttSession && (appState === 'listening' || appState === 'dictating')) {
+      try {
+        const pcmBuf = Buffer.from(chunkBase64, 'base64');
+        activeLiveSttSession.sendPcmChunk(pcmBuf);
+      } catch (_) {}
+    }
+  });
+
+  ipcMain.on('stop-live-audio', () => {
+    if (activeLiveSttSession) {
+      activeLiveSttSession.finishWithSilence();
+    }
+  });
+
+  // Receive recorded audio from renderer (fallback if live session has not finished)
   ipcMain.on('audio-recorded', async (event, audioBase64) => {
+    if (hasProcessedCurrentTurn) {
+      logToFile('⏭️ Turn already processed by live STT, skipping fallback audio-recorded');
+      return;
+    }
+    hasProcessedCurrentTurn = true;
+    if (activeSttTranscript) {
+      logToFile(`⚡ Using accumulated live STT transcript: "${activeSttTranscript}"`);
+      if (appState === 'dictating' || appState === 'transcribing_dictation') {
+        await processDictation(activeSttTranscript);
+      } else {
+        await processLiveQuestion(activeSttTranscript, 'en-IN');
+      }
+      return;
+    }
     const audioBuffer = Buffer.from(audioBase64, 'base64');
     if (appState === 'dictating' || appState === 'transcribing_dictation') {
       await processDictation(audioBuffer);
@@ -1578,17 +1755,8 @@ function setupIPC() {
       GEMINI_API_KEY: process.env.GEMINI_API_KEY || CONFIG.geminiApiKey || '',
       geminiApiKey: process.env.GEMINI_API_KEY || CONFIG.geminiApiKey || '',
       geminiApiKeyMasked: mask(process.env.GEMINI_API_KEY || CONFIG.geminiApiKey),
-      GEMINI_MODEL: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3-flash-preview',
-      geminiModel: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3-flash-preview',
-      EASYVOICE_API_KEY: process.env.EASYVOICE_API_KEY || CONFIG.easyVoiceApiKey || '',
-      easyVoiceApiKey: process.env.EASYVOICE_API_KEY || CONFIG.easyVoiceApiKey || '',
-      easyVoiceApiKeyMasked: mask(process.env.EASYVOICE_API_KEY || CONFIG.easyVoiceApiKey),
-      GOOGLE_TTS_API_KEY: process.env.GOOGLE_TTS_API_KEY || CONFIG.googleTtsApiKey || '',
-      googleTtsApiKey: process.env.GOOGLE_TTS_API_KEY || CONFIG.googleTtsApiKey || '',
-      googleTtsApiKeyMasked: mask(process.env.GOOGLE_TTS_API_KEY || CONFIG.googleTtsApiKey),
-      ASSEMBLYAI_API_KEY: process.env.ASSEMBLYAI_API_KEY || CONFIG.assemblyaiApiKey || '',
-      assemblyaiApiKey: process.env.ASSEMBLYAI_API_KEY || CONFIG.assemblyaiApiKey || '',
-      assemblyaiApiKeyMasked: mask(process.env.ASSEMBLYAI_API_KEY || CONFIG.assemblyaiApiKey),
+      GEMINI_MODEL: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3.5-flash-lite',
+      geminiModel: process.env.GEMINI_MODEL || CONFIG.geminiModel || 'gemini-3.5-flash-lite',
       GNANI_API_KEY: process.env.GNANI_API_KEY || CONFIG.gnaniApiKey || '',
       gnaniApiKey: process.env.GNANI_API_KEY || CONFIG.gnaniApiKey || '',
       gnaniApiKeyMasked: mask(process.env.GNANI_API_KEY || CONFIG.gnaniApiKey),
@@ -1604,12 +1772,6 @@ function setupIPC() {
       GEMINI_API_KEY: 'GEMINI_API_KEY',
       geminiModel: 'GEMINI_MODEL',
       GEMINI_MODEL: 'GEMINI_MODEL',
-      easyVoiceApiKey: 'EASYVOICE_API_KEY',
-      EASYVOICE_API_KEY: 'EASYVOICE_API_KEY',
-      googleTtsApiKey: 'GOOGLE_TTS_API_KEY',
-      GOOGLE_TTS_API_KEY: 'GOOGLE_TTS_API_KEY',
-      assemblyaiApiKey: 'ASSEMBLYAI_API_KEY',
-      ASSEMBLYAI_API_KEY: 'ASSEMBLYAI_API_KEY',
       gnaniApiKey: 'GNANI_API_KEY',
       GNANI_API_KEY: 'GNANI_API_KEY',
     };
@@ -1636,16 +1798,6 @@ function setupIPC() {
 
     // Re-initialize services dynamically
     if (geminiService) geminiService = new GeminiService(process.env.GEMINI_API_KEY);
-    const evKey = (process.env.EASYVOICE_API_KEY || CONFIG.easyVoiceApiKey || '').trim();
-    if (evKey && evKey.startsWith('ev_')) {
-      googleTtsService = new EasyVoiceTTSService(evKey);
-      googleTtsService.prewarm();
-      console.log('[Pointy] 🎙️ EasyVoice TTS re-initialized with Kokoro-82M');
-    } else if (googleTtsService) {
-      googleTtsService = new GoogleTTSService(process.env.GOOGLE_TTS_API_KEY || process.env.GEMINI_API_KEY);
-      googleTtsService.prewarm();
-    }
-    if (assemblyaiService) assemblyaiService = new AssemblyAIService(process.env.ASSEMBLYAI_API_KEY);
     if (gnaniService) gnaniService = new GnaniService(process.env.GNANI_API_KEY);
 
     chatAppWindow?.webContents.send('api-keys-updated');
@@ -1659,22 +1811,22 @@ function setupIPC() {
       const { GoogleGenAI } = require('@google/genai');
       const testAi = new GoogleGenAI({ apiKey: key });
       const resp = await testAi.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.5-flash-lite',
         contents: 'Ping',
       });
       const modelResponse = resp.text ? resp.text.trim() : 'Connected';
-      return { success: true, message: 'Connected to Gemini 3 Flash successfully!', modelResponse };
+      return { success: true, message: 'Connected to Gemini successfully!', modelResponse };
     } catch (err) {
       return { success: false, error: err.message };
     }
   });
 
   ipcMain.handle('chat-speak-text', async (event, text) => {
-    if (!googleTtsService) {
+    if (!gnaniService || !gnaniService.hasApiKey()) {
       return { audioContent: null };
     }
     try {
-      const audioBase64 = await googleTtsService.speak(text);
+      const audioBase64 = await gnaniService.speak(text);
       return { audioContent: audioBase64 };
     } catch (err) {
       return { audioContent: null, error: err.message };
@@ -1702,17 +1854,8 @@ app.whenReady().then(async () => {
   // Initialize services
   actionService = new ActionService();
   conversationManager = new ConversationManager();
-  assemblyaiService = new AssemblyAIService(CONFIG.assemblyaiApiKey);
   gnaniService = new GnaniService(CONFIG.gnaniApiKey);
   geminiService = new GeminiService(CONFIG.geminiApiKey);
-  const evKey = (CONFIG.easyVoiceApiKey || process.env.EASYVOICE_API_KEY || '').trim();
-  if (evKey && evKey.startsWith('ev_')) {
-    googleTtsService = new EasyVoiceTTSService(evKey);
-    console.log('[Pointy] 🎙️ EasyVoice TTS service initialized with Kokoro-82M');
-  } else {
-    googleTtsService = new GoogleTTSService(CONFIG.googleTtsApiKey);
-  }
-  googleTtsService.prewarm();
   console.log('[Pointy] ⚡ ActionService ready (Notepad, YouTube, Browser, System Launcher active)');
 
   // Create windows and tray
@@ -1721,6 +1864,7 @@ app.whenReady().then(async () => {
   createTray();
   setupIPC();
   registerHotkeys();
+  setupPushToTalk();
 
   // Initialize native OS mouse click listener for multi-step guidance
   try {
@@ -1736,12 +1880,10 @@ app.whenReady().then(async () => {
   console.log('[Pointy] 🎙️ Summon via: Alt+C OR F8 OR Ctrl+Space OR click the Red Cursor');
   console.log('[Pointy] 🎯 The Red AI Cursor pops out right from your mouse!');
 
-  if (assemblyaiService.hasApiKey()) {
-    console.log('[Pointy] ✅ AssemblyAI ready (Speech-to-Text)');
-  } else if (gnaniService.hasApiKey()) {
-    console.log('[Pointy] ✅ Gnani Prisma ready (Speech-to-Text)');
+  if (gnaniService.hasApiKey()) {
+    console.log('[Pointy] ✅ Gnani AI ready (Prisma STT & Timbre Voice TTS)');
   } else {
-    console.log('[Pointy] ℹ️  No STT key configured (set ASSEMBLYAI_API_KEY in .env)');
+    console.log('[Pointy] ℹ️  No GNANI_API_KEY configured (set GNANI_API_KEY in .env)');
   }
 
   if (geminiService.hasApiKey()) {
@@ -1750,20 +1892,15 @@ app.whenReady().then(async () => {
     console.log('[Pointy] ⚠️  No GEMINI_API_KEY — running in demo mode');
     console.log('[Pointy]    Get a free key at: https://aistudio.google.com/apikey');
   }
-
-  if (googleTtsService instanceof EasyVoiceTTSService && googleTtsService.hasApiKey()) {
-    console.log('[Pointy] ✅ EasyVoice TTS ready (Kokoro-82M AI Voice)');
-  } else if (googleTtsService.hasApiKey()) {
-    console.log('[Pointy] ✅ Google Cloud TTS ready');
-  } else if (gnaniService.hasApiKey()) {
-    console.log('[Pointy] ✅ Gnani Timbre ready (TTS voice output)');
-  } else {
-    console.log('[Pointy] ℹ️  TTS voice output is off (configure EASYVOICE_API_KEY in .env)');
-  }
 });
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  keyboardListener?.kill();
+  if (activeLiveSttSession) {
+    try { activeLiveSttSession.close(); } catch (_) {}
+    activeLiveSttSession = null;
+  }
   mouseWatcherService?.stop();
   clearMultiStep();
 });

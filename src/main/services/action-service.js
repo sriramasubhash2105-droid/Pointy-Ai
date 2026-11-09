@@ -801,7 +801,10 @@ class ActionService {
       }
     }
 
-    // F. Media controls
+    // F. Media & Audio controls
+    if (/^(mute|unmute|silence|mute sound|turn off sound|mute audio)$/i.test(clean)) {
+      return { matched: true, type: 'media_key', key: 'volume_mute', name: 'Mute/Unmute', reply: 'Toggled sound mute!' };
+    }
     if (/^(play music|resume music|pause music|stop music|toggle music)$/i.test(clean)) {
       return { matched: true, type: 'media_key', key: 'play_pause', name: 'Media Play/Pause', reply: 'Toggled music playback!' };
     }
@@ -816,6 +819,23 @@ class ActionService {
     }
     if (/^(volume down|quieter|lower volume)$/i.test(clean)) {
       return { matched: true, type: 'media_key', key: 'volume_down', name: 'Volume Down', reply: 'Lowered volume!' };
+    }
+
+    // G. System Quick Commands (<5ms zero-latency execution)
+    if (/^(lock screen|lock computer|lock pc|lock workstation)$/i.test(clean)) {
+      return { matched: true, type: 'system_cmd', cmd: 'rundll32.exe user32.dll,LockWorkStation', name: 'Lock Workstation', reply: 'Locking your PC!' };
+    }
+    if (/^(open calculator|calculator|calc|launch calculator)$/i.test(clean)) {
+      return { matched: true, type: 'system_cmd', cmd: 'calc.exe', name: 'Calculator', reply: 'Opening Calculator!' };
+    }
+    if (/^(open task manager|task manager|open taskmgr|taskmgr)$/i.test(clean)) {
+      return { matched: true, type: 'system_cmd', cmd: 'taskmgr.exe', name: 'Task Manager', reply: 'Opening Task Manager!' };
+    }
+    if (/^(open settings|windows settings|system settings|open windows settings)$/i.test(clean)) {
+      return { matched: true, type: 'system_uri', target: 'ms-settings:', name: 'Windows Settings', reply: 'Opening Windows Settings!' };
+    }
+    if (/^(open terminal|open powershell|open command prompt|open cmd)$/i.test(clean)) {
+      return { matched: true, type: 'system_cmd', cmd: 'wt.exe || powershell.exe', name: 'Terminal', reply: 'Opening Terminal!' };
     }
 
     // ─── 2. Search Across Browsers & AI Engines (Brave, Comet, Chrome, Edge) ─
@@ -1442,6 +1462,11 @@ if (${pressEnter ? 1 : 0} -eq 1) {
       }
 
       // 10. Direct media keys (Play/Pause, Next Track, Volume)
+      if (type === 'system_cmd') {
+        exec(action.cmd || action.target, { shell: 'cmd.exe' });
+        return true;
+      }
+
       if (type === 'media_key') {
         this.sendMediaKey(key);
         return true;

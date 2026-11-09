@@ -105,6 +105,7 @@ let activeAudio = null;
 let vadAudioContext = null;
 let vadAnalyser = null;
 let vadInterval = null;
+let livePcmProcessor = null;
 
 // ─── Initialize ──────────────────────────────────────────────────────
 async function init() {
@@ -200,6 +201,18 @@ function setupIPCListeners() {
 
   window.pointyAPI.onPlayAudio((audioBase64) => {
     playAudioBase64(audioBase64);
+  });
+
+  window.pointyAPI.onPlayAudioChunk?.((chunkBase64) => {
+    streamingAudioPlayer.playChunk(chunkBase64);
+  });
+
+  window.pointyAPI.onPlayAudioStart?.(() => {
+    streamingAudioPlayer.start();
+  });
+
+  window.pointyAPI.onPlayAudioStop?.(() => {
+    streamingAudioPlayer.stop();
   });
 
   window.pointyAPI.onError((message) => {
@@ -827,7 +840,7 @@ function setupSpeechRecognition() {
         if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
         speechSilenceTimer = setTimeout(() => {
           stopVoiceSession();
-        }, 1400);
+        }, 1000);
         return;
       }
 
@@ -835,7 +848,7 @@ function setupSpeechRecognition() {
       if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
       speechSilenceTimer = setTimeout(() => {
         stopVoiceSession();
-      }, 1600);
+      }, 700);
     };
 
     speechRecognizer.onerror = (e) => {
@@ -856,6 +869,84 @@ function setupSpeechRecognition() {
   } catch (err) {
     console.warn('[Pointy] SpeechRecognition init:', err);
   }
+}
+
+/**
+ * Convert recorded audio blob into standard 16kHz 16-bit mono PCM WAV format
+ * for direct compatibility with Gnani WebSocket STT streaming.
+ */
+async function audioBlobToWav(blob) {
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioCtx({ sampleRate: 16000 });
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    try { await audioCtx.close(); } catch (_) {}
+
+    const numChannels = 1;
+    const sampleRate = 16000;
+    let pcmData;
+    if (audioBuffer.numberOfChannels === 1) {
+      pcmData = audioBuffer.getChannelData(0);
+    } else {
+      const ch0 = audioBuffer.getChannelData(0);
+      const ch1 = audioBuffer.getChannelData(1);
+      pcmData = new Float32Array(ch0.length);
+      for (let i = 0; i < ch0.length; i++) {
+        pcmData[i] = (ch0[i] + ch1[i]) / 2;
+      }
+    }
+
+    const dataSize = pcmData.length * 2;
+    const wavBuffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(wavBuffer);
+
+    function writeString(v, offset, str) {
+      for (let i = 0; i < str.length; i++) {
+        v.setUint8(offset + i, str.charCodeAt(i));
+      }
+    }
+
+    // RIFF header
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(view, 8, 'WAVE');
+    // Subchunk 1 (format)
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * 2, true);
+    view.setUint16(32, numChannels * 2, true);
+    view.setUint16(34, 16, true);
+    // Subchunk 2 (data)
+    writeString(view, 36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    let offset = 44;
+    for (let i = 0; i < pcmData.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, pcmData[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return wavBuffer;
+  } catch (err) {
+    console.warn('[Pointy] Audio conversion error, falling back to raw buffer:', err);
+    return await blob.arrayBuffer();
+  }
+}
+
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode.apply(null, chunk);
+  }
+  return btoa(binary);
 }
 
 async function startVoiceSession() {
@@ -897,10 +988,8 @@ async function startVoiceSession() {
 
       if (audioChunks.length === 0) return;
       const blob = new Blob(audioChunks, { type: 'audio/webm' });
-      const buffer = await blob.arrayBuffer();
-      const base64 = btoa(
-        new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
+      const wavBuffer = await audioBlobToWav(blob);
+      const base64 = arrayBufferToBase64(wavBuffer);
       window.pointyAPI.sendAudio(base64);
     };
 
@@ -909,8 +998,29 @@ async function startVoiceSession() {
     // Local Web Audio API VAD (Voice Activity Detection)
     // Runs on device — automatically detects speech start and silence end
     try {
-      vadAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+      vadAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
       const source = vadAudioContext.createMediaStreamSource(mediaStream);
+
+      // Live Real-Time PCM Audio Streamer (2048 samples = 128ms frames at 16kHz)
+      try {
+        livePcmProcessor = vadAudioContext.createScriptProcessor(2048, 1, 1);
+        source.connect(livePcmProcessor);
+        livePcmProcessor.connect(vadAudioContext.destination);
+
+        livePcmProcessor.onaudioprocess = (e) => {
+          if (currentState !== 'listening' && currentState !== 'dictating') return;
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcm16 = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            const s = Math.max(-1, Math.min(1, inputData[i]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+          window.pointyAPI.sendLiveAudioChunk(arrayBufferToBase64(pcm16.buffer));
+        };
+      } catch (pcmErr) {
+        console.warn('[Pointy] Live PCM processor notice:', pcmErr);
+      }
+
       vadAnalyser = vadAudioContext.createAnalyser();
       vadAnalyser.fftSize = 512;
       source.connect(vadAnalyser);
@@ -931,7 +1041,7 @@ async function startVoiceSession() {
         const avg = sum / dataArray.length;
 
         const isDictating = currentState === 'dictating';
-        const silenceThreshold = isDictating ? 1400 : 1300;
+        const silenceThreshold = isDictating ? 1000 : 650;
         const maxSessionDuration = isDictating ? 60000 : 8000;
 
         // Visual indicator of microphone audio presence during dictation
@@ -972,6 +1082,11 @@ async function startVoiceSession() {
 
 function stopVoiceSession() {
   if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
+  if (livePcmProcessor) {
+    try { livePcmProcessor.disconnect(); } catch (_) {}
+    livePcmProcessor = null;
+  }
+  window.pointyAPI.stopLiveAudio();
 
   if (vadInterval) {
     clearInterval(vadInterval);
@@ -2064,8 +2179,122 @@ function speakWithBrowserSynthesis(text, isChat = false) {
   return;
 }
 
-// ─── EasyVoice Kokoro-82M AI Audio Playback ──────────────────────────
+function base64ToArrayBuffer(base64) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// ─── Ultra-Low Latency Streaming Audio Player (Time-to-First-Audio ~120ms) ───
+class StreamingAudioPlayer {
+  constructor() {
+    this.audioCtx = null;
+    this.nextStartTime = 0;
+    this.activeSources = [];
+    this.isFirstChunk = true;
+    this.isPlaying = false;
+  }
+
+  ensureContext() {
+    if (!this.audioCtx || this.audioCtx.state === 'closed') {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      this.audioCtx = new AudioCtx({ sampleRate: 24000 });
+    }
+    if (this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume();
+    }
+  }
+
+  start() {
+    this.ensureContext();
+    this.stop();
+    this.nextStartTime = this.audioCtx.currentTime + 0.04;
+    this.isFirstChunk = true;
+    this.isPlaying = true;
+    const speakingIndicator = document.querySelector('.answer-speaking-indicator');
+    if (speakingIndicator) speakingIndicator.style.opacity = '1';
+  }
+
+  stop() {
+    for (const src of this.activeSources) {
+      try { src.stop(); } catch (_) {}
+    }
+    this.activeSources = [];
+    this.isPlaying = false;
+    const speakingIndicator = document.querySelector('.answer-speaking-indicator');
+    if (speakingIndicator) speakingIndicator.style.opacity = '0';
+    if (this.audioCtx) {
+      this.nextStartTime = this.audioCtx.currentTime;
+    }
+  }
+
+  playChunk(chunkBase64) {
+    if (!chunkBase64) return;
+    this.ensureContext();
+
+    if (!this.isPlaying) {
+      this.start();
+    }
+
+    try {
+      const arrayBuffer = base64ToArrayBuffer(chunkBase64);
+      let pcmBytes = arrayBuffer;
+      if (this.isFirstChunk) {
+        this.isFirstChunk = false;
+        // Strip 44-byte WAV header from chunk 1
+        if (arrayBuffer.byteLength > 44) {
+          const u8 = new Uint8Array(arrayBuffer);
+          if (u8[0] === 0x52 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x46) {
+            pcmBytes = arrayBuffer.slice(44);
+          }
+        }
+      }
+
+      const pcm16 = new Int16Array(pcmBytes);
+      if (pcm16.length === 0) return;
+
+      const audioBuffer = this.audioCtx.createBuffer(1, pcm16.length, 24000);
+      const channelData = audioBuffer.getChannelData(0);
+      for (let i = 0; i < pcm16.length; i++) {
+        channelData[i] = pcm16[i] / 32768.0;
+      }
+
+      const source = this.audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this.audioCtx.destination);
+
+      const startTime = Math.max(this.audioCtx.currentTime, this.nextStartTime);
+      source.start(startTime);
+      this.nextStartTime = startTime + audioBuffer.duration;
+      this.activeSources.push(source);
+
+      source.onended = () => {
+        const idx = this.activeSources.indexOf(source);
+        if (idx !== -1) this.activeSources.splice(idx, 1);
+        if (this.activeSources.length === 0 && this.audioCtx.currentTime >= this.nextStartTime) {
+          this.isPlaying = false;
+          const speakingIndicator = document.querySelector('.answer-speaking-indicator');
+          if (speakingIndicator) speakingIndicator.style.opacity = '0';
+        }
+      };
+    } catch (err) {
+      console.warn('[Pointy] Audio chunk play notice:', err);
+    }
+  }
+}
+
+const streamingAudioPlayer = new StreamingAudioPlayer();
+
+// ─── Gnani Timbre AI Audio Playback ───────────────────────────────────
 function playAudioBase64(base64, isChat = false) {
+  // If streaming audio player is already playing chunks, avoid duplicate playback
+  if (streamingAudioPlayer && (streamingAudioPlayer.isPlaying || streamingAudioPlayer.activeSources.length > 0)) {
+    return;
+  }
   if (!base64) return;
   try {
     if (activeAudio) {

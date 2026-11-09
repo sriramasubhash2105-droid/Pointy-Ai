@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('pointyAPI', {
   onStartRecording: (callback) => ipcRenderer.on('start-recording', callback),
   onStopRecording: (callback) => ipcRenderer.on('stop-recording', callback),
   sendAudio: (audioBase64) => ipcRenderer.send('audio-recorded', audioBase64),
+  sendLiveAudioChunk: (chunkBase64) => ipcRenderer.send('live-audio-chunk', chunkBase64),
+  stopLiveAudio: () => ipcRenderer.send('stop-live-audio'),
 
   // Typed or transcribed question
   sendTypedQuestion: (question) => ipcRenderer.send('typed-question', question),
@@ -19,6 +21,10 @@ contextBridge.exposeInMainWorld('pointyAPI', {
   onTranscript: (callback) => ipcRenderer.on('transcript', (_, data) => callback(data)),
   onPointAt: (callback) => ipcRenderer.on('point-at', (_, data) => callback(data)),
   onPlayAudio: (callback) => ipcRenderer.on('play-audio', (_, audioBase64) => callback(audioBase64)),
+  onPlayAudioStart: (callback) => ipcRenderer.on('play-audio-start', callback),
+  onPlayAudioChunk: (callback) => ipcRenderer.on('play-audio-chunk', (_, data) => callback(data)),
+  onPlayAudioComplete: (callback) => ipcRenderer.on('play-audio-complete', callback),
+  onPlayAudioStop: (callback) => ipcRenderer.on('play-audio-stop', callback),
   onError: (callback) => ipcRenderer.on('error', (_, message) => callback(message)),
   onReset: (callback) => ipcRenderer.on('reset', callback),
   onSpeakFallback: (callback) => ipcRenderer.on('speak-fallback', (_, data) => callback(data)),

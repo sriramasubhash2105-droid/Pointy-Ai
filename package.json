@@ -25,6 +25,7 @@
     "axios": "^1.20.0",
     "form-data": "^4.0.6",
     "node-global-key-listener": "^0.2.0",
-    "screenshot-desktop": "^1.15.7"
+    "screenshot-desktop": "^1.15.7",
+    "ws": "^8.18.0"
   }
 }

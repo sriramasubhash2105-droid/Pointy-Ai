@@ -86,8 +86,7 @@
   const modalTabs = document.querySelectorAll('.modal-tabs .tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
   const inputGeminiKey = document.getElementById('input-gemini-key');
-  const inputTtsKey = document.getElementById('input-tts-key');
-  const inputAssemblyKey = document.getElementById('input-assembly-key');
+  const inputGnaniKey = document.getElementById('input-gnani-key');
   const btnTestGemini = document.getElementById('btn-test-gemini');
   const geminiTestResult = document.getElementById('gemini-test-result');
   const geminiStatusBadge = document.getElementById('gemini-status-badge');
@@ -814,12 +813,9 @@
           geminiStatusBadge.textContent = 'Missing';
           geminiStatusBadge.className = 'status-badge missing';
         }
-        if (keys.EASYVOICE_API_KEY) {
-          inputTtsKey.value = keys.EASYVOICE_API_KEY;
-        } else if (keys.GOOGLE_TTS_API_KEY) {
-          inputTtsKey.value = keys.GOOGLE_TTS_API_KEY;
+        if (keys.GNANI_API_KEY && inputGnaniKey) {
+          inputGnaniKey.value = keys.GNANI_API_KEY;
         }
-        if (keys.ASSEMBLYAI_API_KEY) inputAssemblyKey.value = keys.ASSEMBLYAI_API_KEY;
         if (keys.GEMINI_MODEL || keys.geminiModel) {
           currentModel = keys.GEMINI_MODEL || keys.geminiModel;
           localStorage.setItem('chat_reasoning_model', currentModel);
@@ -891,13 +887,10 @@
       updateModelSelectorLabel(currentModel);
 
       // 1. Save API Keys and active model to environment
-      const ttsVal = inputTtsKey.value.trim();
       const keys = {
         GEMINI_API_KEY: inputGeminiKey.value.trim(),
         GEMINI_MODEL: currentModel,
-        EASYVOICE_API_KEY: ttsVal,
-        GOOGLE_TTS_API_KEY: ttsVal.startsWith('ev_') ? '' : ttsVal,
-        ASSEMBLYAI_API_KEY: inputAssemblyKey.value.trim()
+        GNANI_API_KEY: inputGnaniKey ? inputGnaniKey.value.trim() : '',
       };
       await window.chatAPI.saveApiKeys(keys);
 
