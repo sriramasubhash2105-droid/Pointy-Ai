@@ -787,7 +787,7 @@
       "id": "conv_1792921748189_a6cmm",
       "title": "what's on the screen",
       "createdAt": 1792921748189,
-      "updatedAt": 1794200674611,
+      "updatedAt": 1794201466946,
       "messages": [
         {
           "id": "msg_1792922620620_mxjl",
@@ -5011,6 +5011,90 @@
           "steps": [],
           "found": true,
           "timestamp": 1794200674611
+        },
+        {
+          "id": "msg_1794200808824_goie",
+          "role": "user",
+          "text": "what is 2+2",
+          "timestamp": 1794200808824
+        },
+        {
+          "id": "msg_1794200808829_4eb2",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "2 plus 2 is 4.",
+          "detailed_explanation": "2 plus 2 is 4.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794200808829
+        },
+        {
+          "id": "msg_1794200819837_sb6j",
+          "role": "user",
+          "text": "how are youu",
+          "timestamp": 1794200819837
+        },
+        {
+          "id": "msg_1794200824248_98hy",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "I'm doing fantastic, thank you for asking! I'm right here on your desktop, ready to help you navigate your apps, find specific files, or explain anything you see on your screen. Whether you need to launch a program, do some deep research, or just want to know more about your current view, I've got you covered. How can I make your workflow smoother today?",
+          "detailed_explanation": "I am functioning perfectly and ready to assist with any desktop tasks or questions you have about your screen.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794200824248
+        },
+        {
+          "id": "msg_1794200869834_l8qt",
+          "role": "user",
+          "text": "what is on my screen",
+          "timestamp": 1794200869834
+        },
+        {
+          "id": "msg_1794200873661_tz6x",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "You are currently viewing a Frequently Asked Questions page for the Great Indian AI Internship Challenge on the Gnani.ai website. The screen displays several expanded questions regarding project submissions, API platform access at app.gnani.ai/voice, and technical support. I can see details about using their API keys and specific instructions for participants who may not have institutional emails. It looks like you are researching the internship requirements and platform logistics.",
+          "detailed_explanation": "### Screen Overview\nYou are viewing the **Gnani.ai Internship FAQ** page in a web browser. \n\n### Key Information Visible:\n*   **Platform Access:** Instructions point to `app.gnani.ai/voice` for building and managing API keys.\n*   **Documentation:** A link to `docs.gnani.ai` is provided for quick starts.\n*   **Internship Scope:** The text clarifies that this challenge specifically covers the API platform and not the separate agent builder.\n*   **Navigation:** You have multiple tabs open, including Gmail and Google Drive, and your Windows taskbar is visible at the bottom with various productivity apps.",
+          "steps": [
+            {
+              "x": 330,
+              "y": 86,
+              "w": 860,
+              "h": 816,
+              "label": "FAQ Content",
+              "instruction": "The main FAQ section of the Gnani.ai internship page.",
+              "element_id": null
+            }
+          ],
+          "found": true,
+          "timestamp": 1794200873661
+        },
+        {
+          "id": "msg_1794201461291_74ii",
+          "role": "user",
+          "text": "what is on the screen",
+          "timestamp": 1794201461291
+        },
+        {
+          "id": "msg_1794201466946_m6ib",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "You are currently looking at the Claude desktop application, where you've received a detailed plan for creating a demo video for an application. The screen outlines a 75 to 90-second video structure, starting with a 10-second motion graphic hook followed by a problem statement and two specific demo segments. It even includes a timeline table that breaks down the visual elements and voiceover script for each section, such as showing a guide mode in Hindi and an instant assistant response for system queries.",
+          "detailed_explanation": "### Screen Overview: Claude Desktop App\n\nYou are viewing a conversation in the **Claude desktop app** titled \"Voice assistant latency optimization.\" The AI has provided a comprehensive storyboard and production plan for a demo video.\n\n#### Key Content Breakdown:\n*   **Video Strategy:** A recommendation for a 75-90 second video with a strong 10-second opening to capture attention.\n*   **The Storyboard:** A narrative flow consisting of a Hook → Problem → Solution (Pointy) → How it works → Call to Action.\n*   **Production Timeline:** A detailed table mapping out timestamps (0:00 to 0:45+) with specific instructions for:\n    *   **Motion Graphics:** Text glitching and morphing effects.\n    *   **Problem Montage:** A fast-paced sequence of searching through Windows Settings.\n    *   **Demos:** Specific scenarios like asking for Bluetooth help in Hinglish and checking battery status.\n\nThis layout is designed to help you organize the filming and editing process for a professional project submission.",
+          "steps": [
+            {
+              "x": 384,
+              "y": 10,
+              "w": 768,
+              "h": 883,
+              "label": "Claude Chat Interface",
+              "instruction": "The main window showing the video production plan.",
+              "element_id": null
+            }
+          ],
+          "found": true,
+          "timestamp": 1794201466946
         }
       ]
     }

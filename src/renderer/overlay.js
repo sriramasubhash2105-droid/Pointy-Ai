@@ -44,6 +44,52 @@ function cancelStandbyGlide() {
   }
 }
 
+// ─── Voice Speech & Card Dismissal Lifecycle ─────────────────────────
+function isVoiceSpeaking() {
+  if (streamingAudioPlayer) {
+    if (streamingAudioPlayer.isPlaying) return true;
+    if (streamingAudioPlayer.activeSources.length > 0) return true;
+    if (streamingAudioPlayer.audioCtx && streamingAudioPlayer.audioCtx.currentTime < (streamingAudioPlayer.nextStartTime - 0.05)) {
+      return true;
+    }
+  }
+  if (activeAudio && !activeAudio.paused && !activeAudio.ended) {
+    return true;
+  }
+  return false;
+}
+
+function scheduleAnswerDismissal(delayMs = 5500) {
+  if (isChatModeActive) return; // Never auto-dismiss during interactive chat mode
+  if (answerDismissTimer) {
+    clearTimeout(answerDismissTimer);
+    answerDismissTimer = null;
+  }
+
+  // Never dismiss while speech is still playing!
+  if (isVoiceSpeaking()) {
+    return;
+  }
+
+  // Never dismiss while user is hovering over card or interacting
+  if (cursorAnswerCard && cursorAnswerCard.matches(':hover')) {
+    return;
+  }
+
+  const isIntermediate = activeMultiStepInfo && !activeMultiStepInfo.isFinalStep;
+  const actualDelay = isIntermediate ? 30000 : delayMs;
+
+  answerDismissTimer = setTimeout(() => {
+    if (isVoiceSpeaking()) {
+      return;
+    }
+    if (cursorAnswerCard && cursorAnswerCard.matches(':hover')) {
+      return;
+    }
+    resetToStandby();
+  }, actualDelay);
+}
+
 // Multi-turn chat session state: true ONLY when user asked another question right after one question
 let isChatModeActive = false;
 let lastAnswerTurn = null; // { question, result, step }
@@ -215,6 +261,10 @@ function setupIPCListeners() {
 
   window.pointyAPI.onPlayAudioStop?.(() => {
     streamingAudioPlayer.stop();
+  });
+
+  window.pointyAPI.onPlayAudioComplete?.(() => {
+    streamingAudioPlayer.markComplete();
   });
 
   window.pointyAPI.onError((message) => {
@@ -455,7 +505,7 @@ function setupEventListeners() {
 
   // Answer card controls
   answerCloseBtn.addEventListener('click', () => {
-    resetToStandby();
+    resetToStandby({ force: true, stopAudio: true });
   });
 
   answerNextBtn.addEventListener('click', () => {
@@ -463,7 +513,7 @@ function setupEventListeners() {
   });
 
   answerSkipBtn.addEventListener('click', () => {
-    resetToStandby();
+    resetToStandby({ force: true, stopAudio: true });
   });
 
   // Deep Research Capsule & Dossier controls
@@ -552,6 +602,12 @@ function setupEventListeners() {
     if (answerDismissTimer) {
       clearTimeout(answerDismissTimer);
       answerDismissTimer = null;
+    }
+  });
+
+  cursorAnswerCard?.addEventListener('mouseleave', () => {
+    if (!isVoiceSpeaking() && !isChatModeActive && currentState === 'pointing') {
+      scheduleAnswerDismissal(4500);
     }
   });
 
@@ -1636,17 +1692,11 @@ function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = fals
 
       // Hold bubble on screen: if audio is actively speaking, DO NOT DISMISS!
       // Audio onended handler will gracefully schedule dismissal after speech completes.
-      if (activeAudio && !activeAudio.paused && !activeAudio.ended) {
+      if (isVoiceSpeaking()) {
         return;
       }
 
-      const isIntermediate = activeMultiStepInfo && !activeMultiStepInfo.isFinalStep;
-      const holdDuration = isIntermediate ? 30000 : 4500;
-      if (answerDismissTimer) clearTimeout(answerDismissTimer);
-      answerDismissTimer = setTimeout(() => {
-        if (activeAudio && !activeAudio.paused && !activeAudio.ended) return;
-        resetToStandby();
-      }, holdDuration);
+      scheduleAnswerDismissal(5500);
     }
   }, charDelay);
 
@@ -1670,12 +1720,9 @@ function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = fals
       }
       positionBubbleAtCursor();
 
-      const isIntermediate = activeMultiStepInfo && !activeMultiStepInfo.isFinalStep;
-      const holdDuration = isIntermediate ? 30000 : 4500;
-      if (answerDismissTimer) clearTimeout(answerDismissTimer);
-      answerDismissTimer = setTimeout(() => {
-        resetToStandby();
-      }, holdDuration);
+      if (!isVoiceSpeaking()) {
+        scheduleAnswerDismissal(5500);
+      }
     }
   };
 
@@ -2089,8 +2136,7 @@ function handlePointAt(result, audioBase64 = null, conversation = null, question
     if (audioBase64) {
       playAudioBase64(audioBase64, isChatModeActive);
     } else {
-      if (answerDismissTimer) clearTimeout(answerDismissTimer);
-      answerDismissTimer = setTimeout(() => resetToStandby(), 4000);
+      scheduleAnswerDismissal(5500);
     }
     return;
   }
@@ -2111,9 +2157,6 @@ function handlePointAt(result, audioBase64 = null, conversation = null, question
     }
     if (audioBase64) {
       playAudioBase64(audioBase64, isChatModeActive);
-    } else if (!isChatModeActive) {
-      if (answerDismissTimer) clearTimeout(answerDismissTimer);
-      answerDismissTimer = setTimeout(() => resetToStandby(), 4500);
     }
     if (!isChatModeActive) {
       positionBubbleAtCursor();
@@ -2166,15 +2209,6 @@ function pointToStep(index, fullText = null, audioBase64 = null, isChat = false,
   // 2. Play TTS speech as cursor points!
   if (audioBase64) {
     playAudioBase64(audioBase64, isChat);
-  } else {
-    if (!isChat) {
-      if (answerDismissTimer) clearTimeout(answerDismissTimer);
-      answerDismissTimer = setTimeout(() => {
-        if (currentState === 'pointing') {
-          resetToStandby();
-        }
-      }, 4500);
-    }
   }
 
   // 3. Keep answer card hidden while flying
@@ -2239,6 +2273,7 @@ class StreamingAudioPlayer {
     this.activeSources = [];
     this.isFirstChunk = true;
     this.isPlaying = false;
+    this.allChunksReceived = false;
   }
 
   ensureContext() {
@@ -2257,6 +2292,7 @@ class StreamingAudioPlayer {
     this.nextStartTime = this.audioCtx.currentTime + 0.04;
     this.isFirstChunk = true;
     this.isPlaying = true;
+    this.allChunksReceived = false;
     const speakingIndicator = document.querySelector('.answer-speaking-indicator');
     if (speakingIndicator) speakingIndicator.style.opacity = '1';
   }
@@ -2267,11 +2303,35 @@ class StreamingAudioPlayer {
     }
     this.activeSources = [];
     this.isPlaying = false;
+    this.allChunksReceived = false;
     const speakingIndicator = document.querySelector('.answer-speaking-indicator');
     if (speakingIndicator) speakingIndicator.style.opacity = '0';
     if (this.audioCtx) {
       this.nextStartTime = this.audioCtx.currentTime;
     }
+  }
+
+  markComplete() {
+    this.allChunksReceived = true;
+    this.checkPlaybackFinished();
+  }
+
+  checkPlaybackFinished() {
+    if (!this.allChunksReceived) return;
+    if (this.activeSources.length > 0) return;
+    if (this.audioCtx && this.audioCtx.currentTime < this.nextStartTime - 0.05) {
+      const remainingMs = Math.max(50, Math.round((this.nextStartTime - this.audioCtx.currentTime) * 1000));
+      setTimeout(() => this.checkPlaybackFinished(), remainingMs);
+      return;
+    }
+
+    this.isPlaying = false;
+    const speakingIndicator = document.querySelector('.answer-speaking-indicator');
+    if (speakingIndicator) speakingIndicator.style.opacity = '0';
+
+    // ⚡ Voice speech has naturally finished!
+    // Hold answer card on screen for 5.5 seconds so user can comfortably read it
+    scheduleAnswerDismissal(5500);
   }
 
   playChunk(chunkBase64) {
@@ -2317,11 +2377,7 @@ class StreamingAudioPlayer {
       source.onended = () => {
         const idx = this.activeSources.indexOf(source);
         if (idx !== -1) this.activeSources.splice(idx, 1);
-        if (this.activeSources.length === 0 && this.audioCtx.currentTime >= this.nextStartTime) {
-          this.isPlaying = false;
-          const speakingIndicator = document.querySelector('.answer-speaking-indicator');
-          if (speakingIndicator) speakingIndicator.style.opacity = '0';
-        }
+        this.checkPlaybackFinished();
       };
     } catch (err) {
       console.warn('[Pointy] Audio chunk play notice:', err);
@@ -2366,12 +2422,7 @@ function playAudioBase64(base64, isChat = false) {
       if (speakingIndicator) speakingIndicator.style.opacity = '0.3';
 
       if (!isChat) {
-        if (answerDismissTimer) clearTimeout(answerDismissTimer);
-        answerDismissTimer = setTimeout(() => {
-          if (currentState === 'pointing') {
-            resetToStandby();
-          }
-        }, 2800);
+        scheduleAnswerDismissal(5500);
       }
     };
 
@@ -2385,6 +2436,10 @@ function playAudioBase64(base64, isChat = false) {
 
 // ─── Reset to Standby (Follows cursor continuously) ──────────────────
 function resetToStandby(options = {}) {
+  // If voice is actively speaking and this is not a forced user close, DO NOT DISMISS!
+  if (!options.force && isVoiceSpeaking()) {
+    return;
+  }
   const stopAudio = options.stopAudio !== false;
   cancelStandbyGlide();
   if (answerDismissTimer) {
@@ -2414,9 +2469,14 @@ function resetToStandby(options = {}) {
   cursorAnswerCard.style.height = '';
   cursorAnswerCard.classList.remove('chat-mode', 'size-compact', 'size-medium', 'size-expanded', 'manually-resized', 'assistant-mode', 'is-speaking', 'details-open');
 
-  if (stopAudio && activeAudio) {
-    activeAudio.pause();
-    activeAudio = null;
+  if (stopAudio) {
+    if (activeAudio) {
+      activeAudio.pause();
+      activeAudio = null;
+    }
+    if (streamingAudioPlayer) {
+      streamingAudioPlayer.stop();
+    }
   }
 
   if (activeStreamingTimer) {
