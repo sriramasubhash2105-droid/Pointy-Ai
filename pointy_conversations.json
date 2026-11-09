@@ -787,7 +787,7 @@
       "id": "conv_1792921748189_a6cmm",
       "title": "what's on the screen",
       "createdAt": 1792921748189,
-      "updatedAt": 1794197006160,
+      "updatedAt": 1794200674611,
       "messages": [
         {
           "id": "msg_1792922620620_mxjl",
@@ -4803,6 +4803,214 @@
           ],
           "found": true,
           "timestamp": 1794197006160
+        },
+        {
+          "id": "msg_1794198326535_t52k",
+          "role": "user",
+          "text": "hello",
+          "timestamp": 1794198326535
+        },
+        {
+          "id": "msg_1794198326543_lw21",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Good morning! How can I assist you?",
+          "detailed_explanation": "Good morning! How can I assist you?",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794198326543
+        },
+        {
+          "id": "msg_1794198343316_eox4",
+          "role": "user",
+          "text": "what is the time",
+          "timestamp": 1794198343316
+        },
+        {
+          "id": "msg_1794198343320_easf",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "It's 9:55 AM.",
+          "detailed_explanation": "It's 9:55 AM.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794198343320
+        },
+        {
+          "id": "msg_1794198383878_qxn3",
+          "role": "user",
+          "text": "increase the volume to 70",
+          "timestamp": 1794198383878
+        },
+        {
+          "id": "msg_1794198387072_eeqa",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "I've increased your system volume to 70 percent for you.",
+          "detailed_explanation": "The system volume has been adjusted to 70%.",
+          "steps": [],
+          "found": false,
+          "timestamp": 1794198387072
+        },
+        {
+          "id": "msg_1794198725372_w4n6",
+          "role": "user",
+          "text": "increase the volume by 20",
+          "timestamp": 1794198725372
+        },
+        {
+          "id": "msg_1794198743492_grhz",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Increasing your volume by 20 percent now!",
+          "detailed_explanation": "Executed action: volume_up.",
+          "steps": [],
+          "found": false,
+          "timestamp": 1794198743492
+        },
+        {
+          "id": "msg_1794198863210_ywj0",
+          "role": "user",
+          "text": "increase the volume by 20",
+          "timestamp": 1794198863210
+        },
+        {
+          "id": "msg_1794198863214_7t3k",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Increased volume by 20 percent!",
+          "detailed_explanation": "Executed desktop action: **Volume +20%** (adjust_volume)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794198863214
+        },
+        {
+          "id": "msg_1794198882209_04r9",
+          "role": "user",
+          "text": "increase volume to 50",
+          "timestamp": 1794198882209
+        },
+        {
+          "id": "msg_1794198882213_50j5",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Set volume to 50 percent!",
+          "detailed_explanation": "Executed desktop action: **Volume 50%** (set_volume)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794198882213
+        },
+        {
+          "id": "msg_1794198926345_aagr",
+          "role": "user",
+          "text": "whats 20 times 20",
+          "timestamp": 1794198926346
+        },
+        {
+          "id": "msg_1794198932445_hhk1",
+          "role": "assistant",
+          "mode": "assistant",
+          "reply": "Twenty times twenty is four hundred. It's a simple square calculation where you multiply two by two to get four and then add the two zeros back at the end.",
+          "detailed_explanation": "The mathematical result of 20 multiplied by 20 is 400. \n\n### Calculation Breakdown:\n* **Step 1:** Multiply the non-zero digits: 2 × 2 = 4.\n* **Step 2:** Count the total number of zeros in both factors: there are two zeros.\n* **Step 3:** Append the zeros to the result: 400.\n\nThis is also expressed as 20 squared (20²).",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794198932445
+        },
+        {
+          "id": "msg_1794199389914_dlr7",
+          "role": "user",
+          "text": "what is the time",
+          "timestamp": 1794199389914
+        },
+        {
+          "id": "msg_1794199389919_gdgu",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "It's 10:13 AM.",
+          "detailed_explanation": "It's 10:13 AM.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794199389919
+        },
+        {
+          "id": "msg_1794199403821_stvf",
+          "role": "user",
+          "text": "what time is it",
+          "timestamp": 1794199403821
+        },
+        {
+          "id": "msg_1794199403824_5dp6",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "It's 10:13 AM.",
+          "detailed_explanation": "It's 10:13 AM.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794199403824
+        },
+        {
+          "id": "msg_1794199418233_5q7q",
+          "role": "user",
+          "text": "hello",
+          "timestamp": 1794199418233
+        },
+        {
+          "id": "msg_1794199418238_2o9g",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Good morning! How can I assist you?",
+          "detailed_explanation": "Good morning! How can I assist you?",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794199418238
+        },
+        {
+          "id": "msg_1794199440473_wu63",
+          "role": "user",
+          "text": "how is the weather",
+          "timestamp": 1794199440473
+        },
+        {
+          "id": "msg_1794199440477_8dwz",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Opening Weather for you!",
+          "detailed_explanation": "Executed desktop action: **Weather** (windows_app_id)",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794199440477
+        },
+        {
+          "id": "msg_1794200662198_u96v",
+          "role": "user",
+          "text": "hello",
+          "timestamp": 1794200662198
+        },
+        {
+          "id": "msg_1794200662201_yxqf",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "Hello! How can I help you today?",
+          "detailed_explanation": "Hello! How can I help you today?",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794200662201
+        },
+        {
+          "id": "msg_1794200674606_kheh",
+          "role": "user",
+          "text": "what time is it",
+          "timestamp": 1794200674606
+        },
+        {
+          "id": "msg_1794200674611_r8t8",
+          "role": "assistant",
+          "mode": "action",
+          "reply": "It's 10:34 AM.",
+          "detailed_explanation": "It's 10:34 AM.",
+          "steps": [],
+          "found": true,
+          "timestamp": 1794200674611
         }
       ]
     }

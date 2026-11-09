@@ -582,9 +582,214 @@ class ActionService {
 
     // Remove polite prefix / suffix
     clean = clean
-      .replace(/^(can you please|could you please|please|pointy|can you|could you|hey pointy)\s+/i, '')
-      .replace(/\s+(please|for me|right now)$/i, '')
+      .replace(/^(?:can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|will\s+you\s+(?:please\s+)?|would\s+you\s+(?:please\s+)?|can\s+it\s+|please\s+|pointy\s+(?:can\s+you\s+)?|hey\s+pointy\s+(?:can\s+you\s+)?|hi\s+pointy\s+(?:can\s+you\s+)?|pointy\s+)\s*/i, '')
+      .replace(/\s+(?:please|for\s+me|right\s+now|at\s+the\s+moment|now|a\s+bit|a\s+little(?:\s+bit)?|slightly)$/i, '')
       .trim();
+
+    // ─── 000. Instant Local Assistant (<1ms Zero-Latency Fast-Path) ───────────
+    // Fast-path for Time, Date, Volume, Mute, Media, Greetings, and Calculations.
+    // Completely bypasses screen capture, Gemini inference, and spatial cursor movement!
+
+    // 1. Time Queries (Instant local clock)
+    // Matches: "what time is it", "what time it is", "what's the time", "what is the time",
+    // "tell me the time", "tell me time", "tell time", "current time", "time check", "time", "clock", etc.
+    if (
+      /^(?:what(?:'s|\s+is)?\s+(?:the\s+)?time(?:\s+(?:is\s+it|it\s+is))?|tell\s+(?:me\s+)?(?:the\s+)?time|check\s+(?:the\s+)?time|current\s+time|time\s+check|what\s+time(?:\s+(?:is\s+it|it\s+is))?|time|clock)$/i.test(clean) ||
+      clean === 'time' || clean === 'the time' || clean === 'clock' ||
+      /^(?:do\s+you\s+know\s+)?(?:what\s+time\s+(?:is\s+it|it\s+is)|what\s+is\s+the\s+time)$/i.test(clean)
+    ) {
+      const timeStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      return {
+        matched: true,
+        type: 'instant_answer',
+        name: 'Current Time',
+        reply: `It's ${timeStr}.`,
+      };
+    }
+
+    // 2. Date Queries (Instant local calendar)
+    if (
+      /^(?:what(?:'s|\s+is)?\s+(?:today(?:'s)?\s+date|the\s+date|today(?:'s)?\s+day|the\s+day)|what\s+date\s+(?:is\s+it|it\s+is)|what\s+day\s+is\s+(?:it\s+)?today|tell\s+(?:me\s+)?(?:the\s+)?date|today(?:'s)?\s+date|date|today)$/i.test(clean) ||
+      clean === 'date' || clean === 'today'
+    ) {
+      const dateStr = new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+      return {
+        matched: true,
+        type: 'instant_answer',
+        name: "Today's Date",
+        reply: `Today is ${dateStr}.`,
+      };
+    }
+
+    // 3. Direct Target Volume Level (e.g. "set volume to 70", "volume 70", "increase volume to 70")
+    const setVolMatch = clean.match(/^(?:set(?:\s+the)?\s+(?:volume|sound)(?:\s+to)?|change(?:\s+the)?\s+(?:volume|sound)(?:\s+to)?|put(?:\s+the)?\s+(?:volume|sound)(?:\s+to)?|make(?:\s+the)?\s+(?:volume|sound)(?:\s+to)?|volume\s+to|volume|sound\s+to|sound)\s+(\d{1,3})\s*(?:%|percent)?$/i) ||
+      clean.match(/^(?:increase|decrease|raise|lower|bring|turn\s+up|turn\s+down)\s+(?:the\s+)?(?:volume|sound)\s+(?:to|at)\s+(\d{1,3})\s*(?:%|percent)?$/i) ||
+      clean.match(/^(?:set|change|put|make)\s+(?:the\s+)?(?:volume|sound)\s+(?:to|at)?\s*(\d{1,3})\s*(?:%|percent)?$/i);
+    if (setVolMatch) {
+      const val = Math.max(0, Math.min(100, parseInt(setVolMatch[1], 10)));
+      return {
+        matched: true,
+        type: 'set_volume',
+        value: val,
+        name: `Volume ${val}%`,
+        reply: `Set volume to ${val} percent!`,
+      };
+    }
+
+    // 4. Relative Volume Adjustment (e.g. "increase volume by 20", "decrease volume by 15%")
+    const deltaUpMatch = clean.match(/^(?:increase|raise|turn\s+up|boost)\s+(?:the\s+)?(?:volume|sound)\s+by\s+(\d{1,3})\s*(?:%|percent)?$/i);
+    if (deltaUpMatch) {
+      const delta = Math.max(1, Math.min(100, parseInt(deltaUpMatch[1], 10)));
+      return {
+        matched: true,
+        type: 'adjust_volume',
+        delta: delta,
+        name: `Volume +${delta}%`,
+        reply: `Increased volume by ${delta} percent!`,
+      };
+    }
+
+    const deltaDownMatch = clean.match(/^(?:decrease|lower|turn\s+down|reduce)\s+(?:the\s+)?(?:volume|sound)\s+by\s+(\d{1,3})\s*(?:%|percent)?$/i);
+    if (deltaDownMatch) {
+      const delta = Math.max(1, Math.min(100, parseInt(deltaDownMatch[1], 10)));
+      return {
+        matched: true,
+        type: 'adjust_volume',
+        delta: -delta,
+        name: `Volume -${delta}%`,
+        reply: `Decreased volume by ${delta} percent!`,
+      };
+    }
+
+    // 5. Generic Volume Increase / Decrease (+10% / -10% audible steps)
+    if (
+      /^(?:(?:turn|bring|crank|put)\s+(?:up\s+the\s+volume|the\s+volume\s+up|up\s+volume|volume\s+up|up\s+the\s+sound|the\s+sound\s+up|up\s+sound|sound\s+up)|increase(?:\s+the)?\s+(?:volume|sound)|raise(?:\s+the)?\s+(?:volume|sound)|boost(?:\s+the)?\s+(?:volume|sound)|volume\s+up|sound\s+up|make\s+it\s+louder|louder|higher\s+volume|higher\s+sound)$/i.test(clean)
+    ) {
+      return {
+        matched: true,
+        type: 'adjust_volume',
+        delta: 10,
+        name: 'Volume +10%',
+        reply: 'Turned up volume!',
+      };
+    }
+
+    if (
+      /^(?:(?:turn|bring|put)\s+(?:down\s+the\s+volume|the\s+volume\s+down|down\s+volume|volume\s+down|down\s+the\s+sound|the\s+sound\s+down|down\s+sound|sound\s+down)|decrease(?:\s+the)?\s+(?:volume|sound)|lower(?:\s+the)?\s+(?:volume|sound)|reduce(?:\s+the)?\s+(?:volume|sound)|volume\s+down|sound\s+down|make\s+it\s+(?:quieter|softer)|quieter|softer|lower\s+volume|lower\s+sound)$/i.test(clean)
+    ) {
+      return {
+        matched: true,
+        type: 'adjust_volume',
+        delta: -10,
+        name: 'Volume -10%',
+        reply: 'Turned down volume!',
+      };
+    }
+
+    // 5. Mute / Unmute
+    if (
+      /^(?:mute(?:\s+(?:the\s+)?(?:volume|sound|audio))?|unmute(?:\s+(?:the\s+)?(?:volume|sound|audio))?|silence(?:\s+(?:the\s+)?(?:sound|audio))?|turn\s+off\s+(?:the\s+)?sound|toggle\s+mute)$/i.test(clean)
+    ) {
+      return {
+        matched: true,
+        type: 'media_key',
+        key: 'volume_mute',
+        name: 'Mute/Unmute',
+        reply: 'Toggled sound mute!',
+      };
+    }
+
+    // 6. Media Playback Controls
+    if (/^(?:play\s+music|resume\s+music|pause\s+music|stop\s+music|toggle\s+music|toggle\s+playback|pause|resume)$/i.test(clean)) {
+      return {
+        matched: true,
+        type: 'media_key',
+        key: 'play_pause',
+        name: 'Play/Pause',
+        reply: 'Toggled playback!',
+      };
+    }
+    if (/^(?:next\s+song|next\s+track|skip\s+song|skip\s+track|next)$/i.test(clean)) {
+      return {
+        matched: true,
+        type: 'media_key',
+        key: 'next_track',
+        name: 'Next Track',
+        reply: 'Skipped to next track!',
+      };
+    }
+    if (/^(?:previous\s+song|previous\s+track|prev\s+song|prev\s+track|last\s+song)$/i.test(clean)) {
+      return {
+        matched: true,
+        type: 'media_key',
+        key: 'prev_track',
+        name: 'Previous Track',
+        reply: 'Returned to previous track!',
+      };
+    }
+
+    // 7. Instant Math / Arithmetic
+    const mathMatch = clean.match(/^(?:what\s+is|calculate|calc)\s+(\d+(?:\.\d+)?)\s*(times|\*|x|multiplied\s+by|divided\s+by|\/|plus|\+|minus|\-)\s*(\d+(?:\.\d+)?)$/i);
+    if (mathMatch) {
+      const n1 = parseFloat(mathMatch[1]);
+      const op = mathMatch[2].toLowerCase();
+      const n2 = parseFloat(mathMatch[3]);
+      let ans;
+      let spokenOp = op;
+      if (op === 'times' || op === '*' || op === 'x' || op === 'multiplied by') {
+        ans = n1 * n2;
+        spokenOp = 'times';
+      } else if (op === 'divided by' || op === '/') {
+        ans = n2 !== 0 ? Math.round((n1 / n2) * 100) / 100 : 'undefined';
+        spokenOp = 'divided by';
+      } else if (op === 'plus' || op === '+') {
+        ans = n1 + n2;
+        spokenOp = 'plus';
+      } else if (op === 'minus' || op === '-') {
+        ans = n1 - n2;
+        spokenOp = 'minus';
+      }
+      return {
+        matched: true,
+        type: 'instant_answer',
+        name: `${n1} ${spokenOp} ${n2}`,
+        reply: `${n1} ${spokenOp} ${n2} is ${ans}.`,
+      };
+    }
+
+    // 8. Instant Greetings & Conversational Identity
+    if (/^(?:hi|hello|hey|good\s+morning|good\s+afternoon|good\s+evening)$/i.test(clean)) {
+      return {
+        matched: true,
+        type: 'instant_answer',
+        name: 'Greeting',
+        reply: 'Hello! How can I help you today?',
+      };
+    }
+    if (/^(?:how\s+are\s+you|how\s+are\s+you\s+doing|how's\s+it\s+going)$/i.test(clean)) {
+      return {
+        matched: true,
+        type: 'instant_answer',
+        name: 'Status',
+        reply: 'I am doing great and ready to assist you on your desktop!',
+      };
+    }
+    if (/^(?:who\s+are\s+you|what\s+is\s+pointy|what\s+are\s+you)$/i.test(clean)) {
+      return {
+        matched: true,
+        type: 'instant_answer',
+        name: 'Identity',
+        reply: 'I am Pointy, your intelligent desktop AI companion. I can point to elements on your screen, launch apps, control volume, conduct deep research, and dictate text for you.',
+      };
+    }
+    if (/^(?:what\s+can\s+you\s+do|help|what\s+are\s+your\s+features)$/i.test(clean)) {
+      return {
+        matched: true,
+        type: 'instant_answer',
+        name: 'Capabilities',
+        reply: 'You can ask me to find anything on your screen, open apps, control volume, play music, conduct background deep research in Claude or ChatGPT, or dictate into any window.',
+      };
+    }
 
     // ─── 00. Background Detailed Deep Research (Claude / ChatGPT) ───────
     // E.g.: "do a detailed research on quantum computing in claude"
@@ -1089,7 +1294,7 @@ class ActionService {
   /**
    * Sends Windows virtual media keys instantly using PowerShell WScript Shell.
    */
-  sendMediaKey(keyType) {
+  sendMediaKey(keyType, repeat = 1) {
     const keyMap = {
       'play_pause': 179,
       'next_track': 176,
@@ -1099,7 +1304,11 @@ class ActionService {
       'volume_mute': 173,
     };
     const code = keyMap[keyType] || 179;
-    exec(`powershell -WindowStyle Hidden -Command "(New-Object -ComObject WScript.Shell).SendKeys([char]${code})"`, { shell: 'cmd.exe' });
+    const count = Math.max(1, Math.min(10, repeat || 1));
+    const psCmd = count === 1
+      ? `(New-Object -ComObject WScript.Shell).SendKeys([char]${code})`
+      : `$w = New-Object -ComObject WScript.Shell; 1..${count} | ForEach-Object { $w.SendKeys([char]${code}) }`;
+    exec(`powershell -WindowStyle Hidden -Command "${psCmd}"`, { shell: 'cmd.exe' });
   }
 
   /**
@@ -1467,8 +1676,26 @@ if (${pressEnter ? 1 : 0} -eq 1) {
         return true;
       }
 
+      if (type === 'set_volume') {
+        const psScript = path.join(__dirname, '../scripts/set-volume.ps1');
+        const target = Math.max(0, Math.min(100, action.value != null ? action.value : 50));
+        exec(`powershell -ExecutionPolicy Bypass -File "${psScript}" -Action set -Value ${target}`, { shell: 'cmd.exe' });
+        return true;
+      }
+
+      if (type === 'adjust_volume') {
+        const psScript = path.join(__dirname, '../scripts/set-volume.ps1');
+        const delta = action.delta || 10;
+        exec(`powershell -ExecutionPolicy Bypass -File "${psScript}" -Action add -Value ${delta}`, { shell: 'cmd.exe' });
+        return true;
+      }
+
       if (type === 'media_key') {
-        this.sendMediaKey(key);
+        this.sendMediaKey(key, action.repeat || 1);
+        return true;
+      }
+
+      if (type === 'instant_answer') {
         return true;
       }
 

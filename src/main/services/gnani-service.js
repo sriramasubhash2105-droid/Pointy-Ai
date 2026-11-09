@@ -1,4 +1,6 @@
 const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * Gnani AI Service
@@ -19,6 +21,17 @@ class GnaniService {
     this._prewarmedSttTimer = null;
     this._prewarmedTtsWs = null;
     this._prewarmedTtsTimer = null;
+    this._persistentTtsWs = null;
+    this._ttsKeepAliveTimer = null;
+    this._ttsQueue = Promise.resolve();
+    if (this.hasApiKey()) {
+      this.initPersistentTtsWs();
+    }
+
+    this._audioCache = new Map();
+    this._cacheFile = path.join(__dirname, '../../../pointy_tts_cache.json');
+    this._saveTimer = null;
+    this.loadAudioCache();
 
     // Supported Timbre v2.5 voice mappings
     this.voiceMap = {
@@ -38,6 +51,31 @@ class GnaniService {
       'mr-IN': 'Bhavna',
       'mr': 'Bhavna',
     };
+  }
+
+  loadAudioCache() {
+    try {
+      if (fs.existsSync(this._cacheFile)) {
+        const raw = fs.readFileSync(this._cacheFile, 'utf8');
+        const obj = JSON.parse(raw);
+        for (const [k, v] of Object.entries(obj)) {
+          if (typeof v === 'string' && v.length > 100) {
+            this._audioCache.set(k, v);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  saveAudioCacheDebounced() {
+    if (this._saveTimer) return;
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null;
+      try {
+        const obj = Object.fromEntries(this._audioCache);
+        fs.writeFileSync(this._cacheFile, JSON.stringify(obj), 'utf8');
+      } catch (_) {}
+    }, 2000);
   }
 
   hasApiKey() {
@@ -120,12 +158,15 @@ class GnaniService {
   }
 
   /**
-   * Prewarm TTS WebSocket connection while Gemini is analyzing screen.
-   * Eliminates TLS handshake latency when synthesizing speech!
+   * Standing persistent warm TTS WebSocket connection.
+   * Eliminates the ~3.5-second TLS & pod allocation handshake completely!
+   * First audio chunk arrives in ~160ms!
    */
-  prewarmTTS() {
+  initPersistentTtsWs() {
     if (!this.hasApiKey()) return;
-    this.closePrewarmedTTS();
+    if (this._persistentTtsWs && (this._persistentTtsWs.readyState === WebSocket.OPEN || this._persistentTtsWs.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
 
     try {
       const ws = new WebSocket(this.ttsWsUrl, {
@@ -135,42 +176,90 @@ class GnaniService {
         },
       });
 
-      const idleTimer = setTimeout(() => {
-        if (this._prewarmedTtsWs === ws) {
-          this._prewarmedTtsWs = null;
-          this.safeCloseWebSocket(ws);
-        }
-      }, 15000);
+      this._persistentTtsWs = ws;
 
-      this._prewarmedTtsWs = ws;
-      this._prewarmedTtsTimer = idleTimer;
+      ws.on('open', () => {
+        console.log('[GnaniService] ⚡ Standing persistent Warm TTS WebSocket connected and ready!');
+        this._startTtsKeepAlive();
+      });
 
-      ws.on('error', () => {
-        if (this._prewarmedTtsWs === ws) {
-          clearTimeout(idleTimer);
-          this._prewarmedTtsWs = null;
-        }
+      ws.on('error', (err) => {
+        console.warn('[GnaniService] Persistent TTS WS notice:', err.message);
       });
 
       ws.on('close', () => {
-        if (this._prewarmedTtsWs === ws) {
-          clearTimeout(idleTimer);
-          this._prewarmedTtsWs = null;
+        this._stopTtsKeepAlive();
+        if (this._persistentTtsWs === ws) {
+          this._persistentTtsWs = null;
         }
+        // Auto-reconnect after 1 second so socket is ALWAYS warm!
+        setTimeout(() => {
+          if (!this._persistentTtsWs && this.hasApiKey()) {
+            this.initPersistentTtsWs();
+          }
+        }, 1000);
       });
-    } catch (_) {}
+    } catch (e) {
+      console.warn('[GnaniService] Failed to init persistent TTS socket:', e.message);
+    }
+  }
+
+  _startTtsKeepAlive() {
+    this._stopTtsKeepAlive();
+    this._ttsKeepAliveTimer = setInterval(() => {
+      if (this._persistentTtsWs && this._persistentTtsWs.readyState === WebSocket.OPEN) {
+        try {
+          this._persistentTtsWs.ping();
+        } catch (_) {}
+      }
+    }, 25000);
+  }
+
+  _stopTtsKeepAlive() {
+    if (this._ttsKeepAliveTimer) {
+      clearInterval(this._ttsKeepAliveTimer);
+      this._ttsKeepAliveTimer = null;
+    }
+  }
+
+  closePersistentTTS() {
+    this._stopTtsKeepAlive();
+    if (this._persistentTtsWs) {
+      const ws = this._persistentTtsWs;
+      this._persistentTtsWs = null;
+      this.safeCloseWebSocket(ws);
+    }
+  }
+
+  prewarmTTS() {
+    this.initPersistentTtsWs();
   }
 
   closePrewarmedTTS() {
-    if (this._prewarmedTtsTimer) {
-      clearTimeout(this._prewarmedTtsTimer);
-      this._prewarmedTtsTimer = null;
+    // Standing persistent socket is intentionally kept warm!
+    // No-op to preserve warm connection between turns.
+  }
+
+  async getWarmTtsWs() {
+    if (!this.hasApiKey()) return null;
+    if (this._persistentTtsWs && this._persistentTtsWs.readyState === WebSocket.OPEN) {
+      return this._persistentTtsWs;
     }
-    if (this._prewarmedTtsWs) {
-      const ws = this._prewarmedTtsWs;
-      this._prewarmedTtsWs = null;
-      this.safeCloseWebSocket(ws);
-    }
+
+    this.initPersistentTtsWs();
+
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      const checkInterval = setInterval(() => {
+        if (this._persistentTtsWs && this._persistentTtsWs.readyState === WebSocket.OPEN) {
+          clearInterval(checkInterval);
+          resolve(this._persistentTtsWs);
+        } else if (!this._persistentTtsWs || Date.now() - startTime > 4000) {
+          clearInterval(checkInterval);
+          resolve(null);
+        }
+      }, 25);
+    });
   }
 
   /**
@@ -395,7 +484,7 @@ class GnaniService {
   /**
    * Timbre TTS - Synthesize speech using Gnani AI WebSocket streaming
    * Endpoint: wss://api.vachana.ai/api/v1/tts
-   * Supports real-time audio chunk streaming via onChunk callback (Time-to-First-Audio ~120ms!)
+   * Powered by Standing Persistent Warm WebSocket (Time-to-First-Audio ~160ms!)
    * Returns base64 encoded audio string (WAV format) for overlay playback
    */
   async speak(text, language = 'en-IN', onChunk = null) {
@@ -407,21 +496,172 @@ class GnaniService {
       ? langKey
       : 'en-IN';
 
-    // Check for prewarmed socket
-    let ws = null;
-    if (this._prewarmedTtsWs && (this._prewarmedTtsWs.readyState === WebSocket.OPEN || this._prewarmedTtsWs.readyState === WebSocket.CONNECTING)) {
-      ws = this._prewarmedTtsWs;
-      this._prewarmedTtsWs = null;
-      if (this._prewarmedTtsTimer) {
-        clearTimeout(this._prewarmedTtsTimer);
-        this._prewarmedTtsTimer = null;
+    const cleanText = text.trim();
+    const cacheKey = `${voice}_${cleanText.toLowerCase()}`;
+
+    // ⚡ Instant Cache Hit (0ms Audio Latency for Common Desktop Replies!)
+    if (this._audioCache && this._audioCache.has(cacheKey)) {
+      const cachedBase64 = this._audioCache.get(cacheKey);
+      if (typeof onChunk === 'function') {
+        try { onChunk(cachedBase64, true); } catch (_) {}
       }
-      try { ws.removeAllListeners(); } catch (_) {}
+      return Promise.resolve(cachedBase64);
+    }
+
+    // Sequential synthesis queue to prevent frame interleaving
+    return new Promise((resolve) => {
+      this._ttsQueue = this._ttsQueue.then(() => {
+        return this._executeSpeak(cleanText, voice, actualLang, cacheKey, onChunk);
+      }).then(resolve).catch((err) => {
+        console.warn('[GnaniService] TTS speak queue notice:', err);
+        resolve(null);
+      });
+    });
+  }
+
+  async _executeSpeak(text, voice, actualLang, cacheKey, onChunk) {
+    const ws = await this.getWarmTtsWs();
+    if (!ws) {
+      console.warn('[GnaniService] No warm TTS WebSocket available, attempting fallback...');
+      return this._fallbackSpeak(text, voice, actualLang, cacheKey, onChunk);
     }
 
     return new Promise((resolve) => {
       let timer = null;
+      let trailingFlushTimer = null;
       let resolved = false;
+      const audioChunks = [];
+
+      const cleanup = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (trailingFlushTimer) {
+          clearTimeout(trailingFlushTimer);
+          trailingFlushTimer = null;
+        }
+        try {
+          ws.off('message', onMessage);
+          ws.off('error', onError);
+          ws.off('close', onClose);
+        } catch (_) {}
+      };
+
+      const finish = (result) => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(result);
+      };
+
+      // 6-second overall safety timeout
+      timer = setTimeout(() => {
+        console.warn('[GnaniService] Persistent TTS WS timeout');
+        if (audioChunks.length > 0) {
+          finish(Buffer.concat(audioChunks).toString('base64'));
+        } else {
+          finish(null);
+        }
+      }, 6000);
+
+      const finalizeUtterance = () => {
+        if (audioChunks.length > 0) {
+          const completeWav = Buffer.concat(audioChunks);
+          const base64Audio = completeWav.toString('base64');
+          if (text.length < 250 && this._audioCache) {
+            this._audioCache.set(cacheKey, base64Audio);
+            this.saveAudioCacheDebounced();
+          }
+          finish(base64Audio);
+        } else {
+          finish(null);
+        }
+      };
+
+      const onMessage = (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'audio' && msg.data?.audio) {
+            const chunkBuffer = Buffer.from(msg.data.audio, 'base64');
+            audioChunks.push(chunkBuffer);
+
+            // Stream chunk immediately to renderer for instant playback (~160ms Time-to-First-Audio!)
+            if (typeof onChunk === 'function') {
+              try {
+                onChunk(msg.data.audio, audioChunks.length === 1);
+              } catch (_) {}
+            }
+          } else if (msg.type === 'complete') {
+            if (msg.data?.audio) {
+              const chunkBuffer = Buffer.from(msg.data.audio, 'base64');
+              audioChunks.push(chunkBuffer);
+              if (typeof onChunk === 'function') {
+                try {
+                  onChunk(msg.data.audio, audioChunks.length === 1);
+                } catch (_) {}
+              }
+            }
+
+            // Gnani sends a final {"type":"complete","message":"Streaming completed"} to cleanly finish
+            if (msg.message === 'Streaming completed') {
+              finalizeUtterance();
+            } else {
+              // Safety fallback: if final "Streaming completed" is delayed, flush after 150ms
+              if (trailingFlushTimer) clearTimeout(trailingFlushTimer);
+              trailingFlushTimer = setTimeout(() => {
+                finalizeUtterance();
+              }, 150);
+            }
+          } else if (msg.type === 'error') {
+            console.error('[GnaniService] Timbre TTS WS error:', msg.message || msg);
+            finish(null);
+          }
+        } catch (parseErr) {
+          console.error('[GnaniService] TTS WS parse error:', parseErr.message);
+        }
+      };
+
+      const onError = (err) => {
+        console.error('[GnaniService] Persistent TTS WS error during speak:', err.message);
+        finish(null);
+      };
+
+      const onClose = () => {
+        finalizeUtterance();
+      };
+
+      ws.on('message', onMessage);
+      ws.once('error', onError);
+      ws.once('close', onClose);
+
+      try {
+        ws.send(JSON.stringify({
+          text: text,
+          voice: voice,
+          model: 'timbre-v2.5',
+          language: actualLang,
+          speed: 1.0,
+          audio_config: {
+            sample_rate: 24000,
+            num_channels: 1,
+            sample_width: 2,
+            encoding: 'linear_pcm',
+            container: 'wav',
+          },
+        }));
+      } catch (sendErr) {
+        console.error('[GnaniService] Failed to send speak payload:', sendErr.message);
+        finish(null);
+      }
+    });
+  }
+
+  async _fallbackSpeak(text, voice, actualLang, cacheKey, onChunk) {
+    return new Promise((resolve) => {
+      let timer = null;
+      let resolved = false;
+      let ws = null;
       const audioChunks = [];
 
       const cleanup = () => {
@@ -442,66 +682,52 @@ class GnaniService {
         resolve(result);
       };
 
-      // 8-second safety timeout
       timer = setTimeout(() => {
-        console.warn('[GnaniService] Timbre TTS WS timeout');
         if (audioChunks.length > 0) {
           finish(Buffer.concat(audioChunks).toString('base64'));
         } else {
           finish(null);
         }
-      }, 8000);
+      }, 7000);
 
-      const payload = JSON.stringify({
-        text: text,
-        voice: voice,
-        model: 'timbre-v2.5',
-        language: actualLang,
-        speed: 1.0,
-        audio_config: {
-          sample_rate: 24000, // 24kHz wideband audio: 87% faster synthesis than 48kHz
-          num_channels: 1,
-          sample_width: 2,
-          encoding: 'linear_pcm',
-          container: 'wav',
-        },
-      });
+      try {
+        ws = new WebSocket(this.ttsWsUrl, {
+          headers: {
+            'X-API-Key-ID': this.apiKey,
+            'Content-Type': 'application/json',
+          },
+        });
 
-      const attachHandlers = () => {
         ws.on('message', (data) => {
           try {
             const msg = JSON.parse(data.toString());
             if (msg.type === 'audio' && msg.data?.audio) {
               const chunkBuffer = Buffer.from(msg.data.audio, 'base64');
               audioChunks.push(chunkBuffer);
-
-              // Stream chunk immediately to renderer for instant playback
               if (typeof onChunk === 'function') {
-                try {
-                  onChunk(msg.data.audio, audioChunks.length === 1);
-                } catch (_) {}
+                try { onChunk(msg.data.audio, audioChunks.length === 1); } catch (_) {}
               }
             } else if (msg.type === 'complete') {
               if (audioChunks.length > 0) {
                 const completeWav = Buffer.concat(audioChunks);
-                finish(completeWav.toString('base64'));
+                const base64Audio = completeWav.toString('base64');
+                if (text.length < 250 && this._audioCache) {
+                  this._audioCache.set(cacheKey, base64Audio);
+                  this.saveAudioCacheDebounced();
+                }
+                finish(base64Audio);
               } else {
                 finish(null);
               }
             } else if (msg.type === 'error') {
-              console.error('[GnaniService] Timbre TTS WS error:', msg.message || msg);
               finish(null);
             }
-          } catch (parseErr) {
-            console.error('[GnaniService] TTS WS parse error:', parseErr.message);
+          } catch (_) {
+            finish(null);
           }
         });
 
-        ws.on('error', (err) => {
-          console.error('[GnaniService] Timbre TTS WS connection error:', err.message);
-          finish(null);
-        });
-
+        ws.on('error', () => finish(null));
         ws.on('close', () => {
           if (audioChunks.length > 0) {
             finish(Buffer.concat(audioChunks).toString('base64'));
@@ -509,28 +735,28 @@ class GnaniService {
             finish(null);
           }
         });
-      };
 
-      try {
-        if (ws) {
-          attachHandlers();
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(payload);
-          } else {
-            ws.on('open', () => ws.send(payload));
+        ws.on('open', () => {
+          try {
+            ws.send(JSON.stringify({
+              text: text,
+              voice: voice,
+              model: 'timbre-v2.5',
+              language: actualLang,
+              speed: 1.0,
+              audio_config: {
+                sample_rate: 24000,
+                num_channels: 1,
+                sample_width: 2,
+                encoding: 'linear_pcm',
+                container: 'wav',
+              },
+            }));
+          } catch (_) {
+            finish(null);
           }
-        } else {
-          ws = new WebSocket(this.ttsWsUrl, {
-            headers: {
-              'X-API-Key-ID': this.apiKey,
-              'Content-Type': 'application/json',
-            },
-          });
-          attachHandlers();
-          ws.on('open', () => ws.send(payload));
-        }
+        });
       } catch (err) {
-        console.error('[GnaniService] Timbre TTS WS initialization exception:', err.message);
         finish(null);
       }
     });

@@ -204,10 +204,12 @@ function setupIPCListeners() {
   });
 
   window.pointyAPI.onPlayAudioChunk?.((chunkBase64) => {
+    triggerPendingAnswerRender();
     streamingAudioPlayer.playChunk(chunkBase64);
   });
 
   window.pointyAPI.onPlayAudioStart?.(() => {
+    triggerPendingAnswerRender();
     streamingAudioPlayer.start();
   });
 
@@ -1601,8 +1603,11 @@ function typeOutSpeechBubble(fullText, detailedExplanation = '', hasExtra = fals
   if (bubbleCursor) bubbleCursor.classList.remove('hidden');
   positionBubbleAtCursor();
 
-  // Character typing cadence: fast for long explanations, natural for short text
-  const charDelay = text.length > 250 ? 12 : (text.length > 100 ? 18 : 26);
+  // Match typing cadence to natural human speech cadence (~12-16 chars/sec):
+  // Short phrases (<60 chars): 46ms/char (harmonizes with spoken voice flow)
+  // Medium phrases (60-200 chars): 26ms/char
+  // Long explanations (>200 chars): 14ms/char
+  const charDelay = text.length > 200 ? 14 : (text.length > 60 ? 26 : 46);
 
   activeTypingTimer = setInterval(() => {
     if (charIdx < text.length) {
@@ -1846,7 +1851,22 @@ function setupCardResize() {
  * in width and height, complete with seamless bottom-right tail, muted blue border,
  * subtle red gradient, and blinking cursor.
  */
-function renderSingleAnswer(result, question) {
+let pendingAnswerRender = null;
+let pendingAnswerTimer = null;
+
+function triggerPendingAnswerRender() {
+  if (pendingAnswerTimer) {
+    clearTimeout(pendingAnswerTimer);
+    pendingAnswerTimer = null;
+  }
+  if (typeof pendingAnswerRender === 'function') {
+    const fn = pendingAnswerRender;
+    pendingAnswerRender = null;
+    fn();
+  }
+}
+
+function renderSingleAnswer(result, question, audioBase64 = null) {
   removeThinkingTurn();
 
   const spoken = (result.reply || (result.detailed_explanation ? result.detailed_explanation.split('\n')[0] : '')).trim();
@@ -1862,7 +1882,29 @@ function renderSingleAnswer(result, question) {
     stepLabel: (result.steps && result.steps[0]) ? result.steps[0].label : '',
   } : null;
 
-  typeOutSpeechBubble(spoken, detailed, hasExtra, false, multiStep);
+  const startTyping = () => {
+    typeOutSpeechBubble(spoken, detailed, hasExtra, false, multiStep);
+  };
+
+  // If audio is already playing or audioBase64 was provided, start typing immediately in sync
+  if (audioBase64 || (streamingAudioPlayer && streamingAudioPlayer.isPlaying)) {
+    startTyping();
+    return;
+  }
+
+  // Otherwise, synchronize text typing with audio stream arrival (or 350ms safety timeout)
+  const bubbleText = document.getElementById('bubble-text');
+  if (bubbleText && cursorAnswerCard) {
+    positionBubbleAtCursor();
+    cursorAnswerCard.classList.remove('hidden');
+    bubbleText.innerHTML = '<span style="opacity:0.65;letter-spacing:4px;font-size:13px;">● ● ●</span>';
+  }
+
+  pendingAnswerRender = startTyping;
+  if (pendingAnswerTimer) clearTimeout(pendingAnswerTimer);
+  pendingAnswerTimer = setTimeout(() => {
+    triggerPendingAnswerRender();
+  }, 650);
 }
 
 /**
@@ -2075,7 +2117,7 @@ function handlePointAt(result, audioBase64 = null, conversation = null, question
     }
     if (!isChatModeActive) {
       positionBubbleAtCursor();
-      renderSingleAnswer(result, question);
+      renderSingleAnswer(result, question, audioBase64);
     }
   }
 }

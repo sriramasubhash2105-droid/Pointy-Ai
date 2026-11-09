@@ -890,7 +890,9 @@ async function executeDesktopAction(action, question, language = 'en-US') {
     found: true,
     reply: replyText,
     reply_lang: language,
-    detailed_explanation: `Executed desktop action: **${action.name || action.target}** (${action.type})`,
+    detailed_explanation: action.type === 'instant_answer'
+      ? replyText
+      : `Executed desktop action: **${action.name || action.target}** (${action.type})`,
     steps: [],
   };
   conversationManager?.addMessage('assistant', normalizedResult);
@@ -1417,8 +1419,7 @@ function resetState() {
   hasProcessedCurrentTurn = false;
   activeSttTranscript = '';
   gnaniService?.closePrewarmedSTT();
-  gnaniService?.closePrewarmedTTS();
-  appState = 'idle';
+    appState = 'idle';
   startMouseTracking();
   overlayWindow?.webContents.send('state-change', 'idle');
   overlayWindow?.webContents.send('reset');
@@ -1902,6 +1903,7 @@ app.on('will-quit', () => {
     activeLiveSttSession = null;
   }
   mouseWatcherService?.stop();
+  gnaniService?.closePersistentTTS();
   clearMultiStep();
 });
 
