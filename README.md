@@ -2,7 +2,7 @@
 
 > **Ask your screen in your own language, and it shows you the answer.**
 >
-> 📄 **[Read the 1-Page Solution Pitch](SOLUTION_PITCH.md)** | 🎬 **[Demo Video & Architecture Walkthrough](DEMO_WALKTHROUGH_AND_ARCHITECTURE.md)**
+> 📄 **[Read the 1-Page Solution Pitch](SOLUTION_PITCH.md)** | 📐 **[Technical Architecture & Feature Specification](DEMO_WALKTHROUGH_AND_ARCHITECTURE.md)**
 
 Pointy is an AI cursor buddy that lives on your screen. Summon it with a hotkey, ask a question about what you see — in Hindi, Tamil, Telugu, Hinglish, or English — and it physically **points** at the right button, link, or field with a glowing ring and animated cursor, while speaking the answer aloud.
 
@@ -60,51 +60,38 @@ npm start
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│              Electron Main Process           │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  │
-│  │ Tray &   │  │Screenshot│  │  Gnani    │  │
-│  │ Hotkeys  │  │ Capture  │  │Prisma+    │  │
-│  │          │  │          │  │Timbre     │  │
-│  └──────────┘  └──────────┘  └───────────┘  │
-│                      │                       │
-│                      ▼                       │
-│         ┌────────────────────────┐           │
-│         │  Gemini Flash 2.5 ☁️  │           │
-│         │  (Vision + Reasoning)  │           │
-│         │  Sees screenshot →     │           │
-│         │  Returns coordinates   │           │
-│         └────────────────────────┘           │
-└──────────────────────┬───────────────────────┘
-                       │
-                       ▼
-            ┌──────────────────┐
-            │  Overlay Window   │
-            │  - Buddy mascot   │
-            │  - Pointer anim   │
-            │  - Target ring    │
-            │  - Captions       │
-            └──────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                        POINTY AI DESKTOP UNIVERSE                      │
+├──────────────────────────────────┬─────────────────────────────────────┤
+│  Transparent Spatial Overlay     │  Standalone Desktop App (Electron)  │
+│  - Red AI Companion Cursor (26px)│  - Chat History & Full-Text Search  │
+│  - Spatial Pointing & Particles  │  - Pinned & Recent Conversations    │
+│  - Adjacent Floating Answer Card │  - Two-Way Real-time Sync           │
+│  - Universal Dictation Capsule   │  - API Keys & Model Configuration   │
+│  - Deep Research Dossier         │  - Voice Synthesis & Speech Monitor │
+└──────────────────────────────────┴─────────────────────────────────────┘
+                                   │
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                        UNIFIED ENGINE PIPELINE                         │
+├─────────────────┬───────────────────┬───────────────────┬──────────────┤
+│ 1. AUDIO & STT  │ 2. VISION & OCR   │ 3. REASONING      │ 4. TTS & ACT │
+│ Gnani Prisma    │ screenshot-desktop│ Fast-path matcher │ Gnani Timbre │
+│ WebSocket stream│ ScreenGrounder    │ Gemini 2.5 Flash  │ ActionService│
+│ 128ms PCM buffer│ Normalization     │ Multi-turn memory │ Paste & exec │
+└─────────────────┴───────────────────┴───────────────────┴──────────────┘
 ```
 
 ### How It Works
 
-1. **User presses hotkey** → Overlay starts recording audio
-2. **Screenshot captured** → Sent directly to Gemini Flash 2.5
-3. **Gnani Prisma** transcribes the spoken question (or user types it)
-4. **Gemini Flash 2.5** sees the screenshot + reads the question → returns:
-   - Exact bounding box coordinates of the target element(s)
-   - A spoken reply in the user's language
-5. **Cursor animates** — glowing pointer flies to the target with a pulsing ring
-6. **Gnani Timbre** (or browser TTS) speaks the answer aloud
+1. **User triggers interaction** → Press <kbd>Alt+C</kbd> to talk, <kbd>Alt+D</kbd> to dictate, or <kbd>Alt+T</kbd> to type.
+2. **Audio streamed in real time** → 16kHz PCM chunks stream via WebSocket to **Gnani Prisma STT** with zero pre-recording delay.
+3. **Screen captured & grounded** → Screen snapshot captured and processed via **Gemini 2.5 Flash** to identify precise UI bounding boxes on a normalized 0–1000 coordinate grid.
+4. **Instant local actions checked** → System commands (volume, brightness, launching apps, browser tabs) execute instantly (<1ms) via **ActionService**.
+5. **Cursor animates spatially** → Glowing companion cursor glides smoothly along a natural bezier curve to the target element with a pulsing ring and particle burst.
+6. **Streaming voice & visual answer** → **Gnani Timbre v2.5** streams neural speech in Indian regional languages / English while the adjacent card displays markdown, code, and follow-up controls.
 
-### Why Gemini Flash 2.5?
-
-- **Free tier** with generous limits — no cost for development and demos
-- **Vision-capable** — directly processes screenshots, no OCR or UI Automation needed
-- **Fast** — Flash model optimized for low latency
-- **Multilingual** — understands Hindi, Tamil, Telugu, and other Indian languages
-- **Accurate** — better at identifying UI elements than text-only approaches
+---
 
 ## 📁 Project Structure
 
@@ -112,45 +99,51 @@ npm start
 pointy-ai/
 ├── src/
 │   ├── main/
-│   │   ├── main.js               # Electron main process & orchestration
-│   │   ├── preload.js            # IPC bridge
+│   │   ├── main.js                     # Core orchestration, hotkeys, state machine & window manager
+│   │   ├── preload.js                  # Secure IPC bridge exposing window.pointyAPI & window.chatAPI
+│   │   ├── scripts/
+│   │   │   └── scan-ui.ps1             # Windows UI Automation accessibility scanner
 │   │   └── services/
-│   │       ├── gemini-service.js  # 🧠 Gemini 3.5 Flash-Lite (vision + reasoning)
-│   │       └── gnani-service.js   # 🔊 Prisma (STT) + Timbre (TTS)
+│   │       ├── action-service.js       # Universal desktop automation, app indexer & browser routing
+│   │       ├── conversation-manager.js # Multi-turn conversation sessions, SQLite/JSON persistence
+│   │       ├── gemini-service.js       # Gemini 2.5 Flash / Flash-Lite vision perception & reasoning
+│   │       ├── gnani-service.js        # Persistent WebSocket streaming for Prisma STT & Timbre TTS
+│   │       └── screen-grounder.js      # Hybrid UI Automation + OCR spatial coordinate grounding
 │   └── renderer/
-│       ├── overlay.html          # Overlay UI
-│       ├── overlay.css           # Premium glassmorphic styles
-│       └── overlay.js            # Animations & interactions
+│       ├── chat-app.html / .js / .css  # Standalone ChatGPT-style desktop application window
+│       └── overlay.html / .js / .css   # Transparent spatial canvas, red cursor mascot & cards
+├── DEMO_WALKTHROUGH_AND_ARCHITECTURE.md # Complete technical specification & pipeline guide
+├── SOLUTION_PITCH.md                   # 1-page executive problem/solution pitch
 ├── package.json
 └── README.md
 ```
 
 ## 🔑 API Keys
 
-| Key | Required | Purpose | Get it at |
-| --- | --- | --- | --- |
-| `GEMINI_API_KEY` | **Yes** | Screen vision + reasoning | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| `GNANI_API_KEY` | Optional | Indian-language voice in/out | [gnani.ai](https://gnani.ai) |
+| Key | Required | Purpose | Provider |
+| :--- | :--- | :--- | :--- |
+| `GEMINI_API_KEY` | **Yes** | Screen vision perception, coordinate grounding & reasoning | [Google AI Studio](https://aistudio.google.com/apikey) |
+| `GNANI_API_KEY` | Optional | Sub-second Indian-language streaming STT & Timbre TTS | [Gnani.ai](https://gnani.ai) |
 
-Without `GEMINI_API_KEY`, the app runs in demo mode with simulated responses.
-Without `GNANI_API_KEY`, voice uses browser's built-in speech synthesis.
+> [!NOTE]
+> - Without `GEMINI_API_KEY`, Pointy runs in demo mode with simulated responses.
+> - Without `GNANI_API_KEY`, voice input falls back to Gemini STT / Web Speech, and voice output uses browser speech synthesis.
 
 ## 🔐 Privacy & Safety
 
-- **Point only** — Pointy never clicks, types, or submits anything
-- **Screenshots processed in cloud** — Sent to Gemini API (Google's privacy policy applies)
-- **No data stored** — Screenshots are not saved locally or on servers
-- **Password fields** — Gemini may see them in screenshots; avoid using Pointy on login pages
-- **Transparent** — All data flow is logged in the console
+- **User-Initiated Execution** — Pointy only types, points, or interacts when explicitly summoned by you via hotkey (<kbd>Alt+C</kbd>, <kbd>Alt+D</kbd>, <kbd>Alt+T</kbd>) or UI click.
+- **On-Demand Vision** — Screenshots are captured strictly at the moment you ask a question; there is no standing or background screen recording.
+- **Transparent Click-Through** — When idle, the overlay window is completely click-through and never traps or intercepts your mouse events.
+- **Direct Keystroke Injection** — In Dictation mode (<kbd>Alt+D</kbd>), text is typed exclusively into your currently focused window via native clipboard paste without stealing window focus.
 
 ## 🏆 Built For
 
 Gnani AI Great Indian AI Internship Challenge 2026
 
-**Models used:**
-- **Gemini Flash 2.5** — Screen vision + reasoning (core brain)
-- **Gnani Prisma** — Speech-to-text (voice input)
-- **Gnani Timbre** — Text-to-speech (voice output)
+**Core AI Engines:**
+- **Gemini 2.5 Flash** — Screen vision perception, grounding & multimodal reasoning
+- **Gnani Prisma** — Low-latency WebSocket streaming speech-to-text
+- **Gnani Timbre v2.5** — Low-latency neural streaming text-to-speech across Indian languages
 
 ## 📄 License
 

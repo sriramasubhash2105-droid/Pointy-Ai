@@ -1,4 +1,4 @@
-npm # Pointy AI: Complete Product Specification, Technical Pipeline & Demo Video Guide
+# Pointy AI: Complete Product Specification, Technical Pipeline & Architecture Guide
 
 ---
 
@@ -192,24 +192,7 @@ Local execution without LLM latency for:
 
 ---
 
-## 4. Scene-by-Scene Demo Video Script
-
-| Scene | Duration | Visual Action | Spoken Prompt / Audio | Demo Goal |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. Intro** | 0:00–0:20 | Pointy companion cursor following mouse smoothly on desktop. | *"Meet Pointy AI: your screen-aware spatial AI companion living directly on your Windows desktop."* | Showcase unobtrusive companion mode. |
-| **2. Spatial Point** | 0:20–0:45 | Press <kbd>Alt+C</kbd>. Ask *"Where is the Source Control tab in VS Code?"* Press <kbd>Alt+C</kbd>. | User: *"Where is the Source Control tab?"*<br>Pointy: *"Here is Source Control on the left Activity Bar."* | Demonstrate visual pointing, flight animation, and particle bursts. |
-| **3. Fast-Path Control** | 0:45–1:05 | Press <kbd>Alt+C</kbd>. Say *"Increase volume by 20"*. | User: *"Increase volume by 20."*<br>Pointy: *"Volume increased by 20 percent!"* | Highlight zero-latency local intent matching. |
-| **4. Explanations & Card** | 1:05–1:40 | Highlight complex code on screen. Ask *"Explain how this function works."* | Pointy speaks comprehensive explanation aloud; floating card displays structured markdown and code. | Showcase rich markdown, auto-resizing, and streaming TTS. |
-| **5. Master Dismissal** | 1:40–1:55 | While Pointy is speaking, press <kbd>Esc</kbd>. | Pointy instantly cuts speech audio and cleanly hides the card. | Demonstrate instant user control with <kbd>Esc</kbd>. |
-| **6. Active Dictation** | 1:55–2:25 | Open blank Notepad. Press <kbd>Alt+D</kbd>. Speak a paragraph. Press <kbd>Alt+D</kbd>. | Pointy writes the spoken words directly into Notepad in real time. | Highlight seamless voice dictation into any app. |
-| **7. Multi-Lingual TTS** | 2:25–2:50 | Press <kbd>Alt+C</kbd>. Ask a question in Hindi or Telugu. | Pointy replies in the same language using native neural voices (*Nalini* / *Devika*). | Showcase Indic and regional language capabilities. |
-| **8. Deep Research** | 2:50–3:30 | Ask *"Do a detailed research on Solid-State Batteries in Claude"*. | Pointy launches Claude, types prompt, shows background capsule, and returns with full Dossier. | Demonstrate autonomous multi-app workflow automation. |
-| **9. Desktop App** | 3:30–3:50 | Click tray icon to open Pointy Desktop App. | Show conversation history, search bar, and settings panel. | Show persistence, searchability, and desktop integration. |
-| **10. Outro** | 3:50–4:10 | Pointy cursor returns to standby mouse follow mode with brand logo. | *"Pointy AI: The first desktop companion that sees, speaks, points, and works with you."* | Strong finishing call-to-action. |
-
----
-
-## 5. Hotkeys & Shortcuts Reference Sheet
+## 4. Hotkeys & Shortcuts Reference Sheet
 
 | Shortcut | Action | Description |
 | :--- | :--- | :--- |
@@ -221,7 +204,7 @@ Local execution without LLM latency for:
 
 ---
 
-## 6. Verification & Production Checklist
+## 5. Verification & Production Checklist
 
 - [x] **Time-to-First-Audio (TTFA)**: Benchmark verified at **~160ms** via persistent warm WebSocket.
 - [x] **Audio Cache**: 25 common control responses hit local cache in **<1ms**.
