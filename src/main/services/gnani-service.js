@@ -781,6 +781,19 @@ class GnaniService {
       },
     });
 
+    // Buffer chunks received while WebSocket is connecting (~150-250ms handshake)
+    // to prevent losing the initial syllables or words of speech!
+    const pendingChunks = [];
+
+    ws.on('open', () => {
+      while (pendingChunks.length > 0) {
+        const chunk = pendingChunks.shift();
+        try {
+          if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
+        } catch (_) {}
+      }
+    });
+
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString());
@@ -810,23 +823,35 @@ class GnaniService {
           try {
             ws.send(chunk);
           } catch (_) {}
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          pendingChunks.push(chunk);
         }
       },
       finishWithSilence: () => {
+        const silence = Buffer.alloc(8000); // 250ms silence for immediate VAD closure
         if (ws.readyState === WebSocket.OPEN) {
           try {
-            // Append 500ms of silence (16000 * 2 * 0.5 = 16000 bytes) to close speech boundary immediately
-            ws.send(Buffer.alloc(16000));
+            ws.send(silence);
           } catch (_) {}
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          pendingChunks.push(silence);
         }
         if (finishSilenceTimer) clearTimeout(finishSilenceTimer);
         finishSilenceTimer = setTimeout(() => {
-          try { ws.close(); } catch (_) {}
+          try {
+            if (ws.readyState === WebSocket.OPEN) ws.close();
+          } catch (_) {}
         }, 1500);
       },
       close: () => {
         if (finishSilenceTimer) clearTimeout(finishSilenceTimer);
-        this.safeCloseWebSocket(ws);
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.once('open', () => {
+            try { ws.close(); } catch (_) {}
+          });
+        } else {
+          this.safeCloseWebSocket(ws);
+        }
       },
       isOpen: () => ws.readyState === WebSocket.OPEN,
     };

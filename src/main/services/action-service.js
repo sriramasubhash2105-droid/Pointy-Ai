@@ -1417,6 +1417,7 @@ Provide rigorous, deep, analytical explanations with concrete details and data.`
         const vbsPath = path.join(os.tmpdir(), `pointy_paste_${Date.now()}_${Math.floor(Math.random() * 1000)}.vbs`);
         const vbsContent = [
           'Set w = CreateObject("WScript.Shell")',
+          'WScript.Sleep 180',
           'w.SendKeys "^v"',
           pressEnter ? 'WScript.Sleep 150\r\nw.SendKeys "{ENTER}"' : '',
         ].filter(Boolean).join('\r\n');

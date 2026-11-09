@@ -1,6 +1,8 @@
 # 🎯 Pointy AI — Screen-Aware Voice Guide
 
 > **Ask your screen in your own language, and it shows you the answer.**
+>
+> 📄 **[Read the 1-Page Solution Pitch](SOLUTION_PITCH.md)** | 🎬 **[Demo Video & Architecture Walkthrough](DEMO_WALKTHROUGH_AND_ARCHITECTURE.md)**
 
 Pointy is an AI cursor buddy that lives on your screen. Summon it with a hotkey, ask a question about what you see — in Hindi, Tamil, Telugu, Hinglish, or English — and it physically **points** at the right button, link, or field with a glowing ring and animated cursor, while speaking the answer aloud.
 
@@ -9,13 +11,14 @@ Pointy is an AI cursor buddy that lives on your screen. Summon it with a hotkey,
 ## ✨ Features
 
 - 🔴 **Spatial Red AI Cursor** — Pops out directly from your mouse cursor when summoned
-- 🎙️ **Voice-first interaction** — Press `Ctrl + Space` and speak your question naturally
+- 🎙️ **Voice-first interaction (<kbd>Alt+C</kbd> / <kbd>F8</kbd>)** — Tap to talk, tap again or pause to ask
+- ✍️ **Universal Voice Dictation (<kbd>Alt+D</kbd>)** — Speak naturally and Pointy types directly into your active window
 - 🎯 **Laser-precise spatial guidance** — Red cursor glides along a smooth trajectory to the target UI element
 - 👁️ **Vision-powered** — Gemini Flash 2.5 analyzes screenshots and calculates pixel bounding boxes
-- 🔊 **Speaks with you** — Speaks answers aloud via TTS (Gnani Timbre or built-in speech engine)
-- 💬 **Adjacent answer card** — Shows the solution and instructions right beside the red cursor
+- 🔊 **Speaks with you** — Real-time low-latency neural TTS streaming in Indian languages and English (Gnani Timbre v2.5)
+- ⚡ **Desktop Automation & Deep Research** — Controls apps, browsers, system volume/settings, and compiles dossiers
+- 💬 **Adjacent answer card & Companion Chat App** — Instant answers beside the cursor + full search & history window
 - 🖱️ **Non-intrusive click-through** — Transparent canvas overlay that never steals focus
-- ⌨️ **Text input fallback** — Double-click the standby dock or type if preferred
 
 ## 🚀 Quick Start
 
@@ -44,14 +47,15 @@ npm start
 
 ### Controls
 
-| Action | How |
-| --- | --- |
-| **Ask with Voice** | Press `Ctrl + Space` → speak your question → press again or pause |
-| **Pop-out origin** | The red cursor pops out directly from your current mouse pointer |
-| **Standby Dock** | Click the red dock in the bottom-right corner to speak |
-| **Ask with Text** | Double-click the standby dock |
-| **Dismiss / Reset** | Press `Escape` or click `✕` on the answer card |
-| **Next Step** | Click "Next Step →" on the floating answer card |
+| Action | Shortcut / Trigger | Description |
+| :--- | :--- | :--- |
+| **Ask with Voice** | <kbd>Alt + C</kbd> or <kbd>F8</kbd> | Tap to start talking, tap again or pause to ask |
+| **Voice Dictation** | <kbd>Alt + D</kbd> | Live dictation typed directly into your active window |
+| **Ask with Text** | <kbd>Alt + T</kbd> | Opens floating text prompt bar beside cursor |
+| **Pop-out Origin** | Click red cursor dock | Cursor pops out from mouse position |
+| **Dismiss / Reset** | <kbd>Escape</kbd> or click `✕` | Immediately stops speech and returns to standby |
+| **Next Step** | Click "Next Step →" | Progresses through multi-step walkthroughs |
+| **Companion Chat App**| Tray icon click | Opens full chat history, search & settings window |
 
 ## 🏗️ Architecture
 

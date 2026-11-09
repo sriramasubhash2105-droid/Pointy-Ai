@@ -117,7 +117,9 @@ let activeLiveSttSession = null;
 let activeSttTranscript = '';
 let hasProcessedCurrentTurn = false;
 let keyboardListener = null;
-let pttDownTime = 0;
+let isToggleKeyHeld = false;
+let lastHotkeyTriggerTime = 0;
+let lastDictationTriggerTime = 0;
 
 // ─── App Configuration ───────────────────────────────────────────────
 const CONFIG = {
@@ -258,7 +260,7 @@ function createTray() {
       click: () => createChatAppWindow(),
     },
     {
-      label: '🎙️ Ask with Voice (Ctrl + Space / F8)',
+      label: '🎙️ Ask with Voice (Alt + C / F8)',
       click: () => handleHotkeyPress(),
     },
     {
@@ -328,7 +330,6 @@ function registerHotkeys() {
   const hotkeys = [
     'Alt+C',
     'F8',
-    'F9',
     'CommandOrControl+Alt+Space',
     'CommandOrControl+Shift+Space',
   ];
@@ -378,55 +379,63 @@ function registerHotkeys() {
   }
 }
 
-// ─── Push-to-Talk (Hold Alt+C or F8 to speak, release to send immediately with 0ms silence lag) ───
+// ─── Voice Toggle Key Listener (Alt+C or F8 tap to talk, tap again to end) ───
 function setupPushToTalk() {
   if (!GlobalKeyboardListener) return;
   try {
     keyboardListener = new GlobalKeyboardListener();
     keyboardListener.addListener((e, down) => {
-      const isAltCDown = (e.name === 'C' && (down['LEFT ALT'] || down['RIGHT ALT']));
-      const isF8Down = (e.name === 'F8');
+      // 1. Global Escape key handling when active
+      if (e.state === 'DOWN' && (e.name === 'ESCAPE' || e.name === 'ESC')) {
+        if (appState !== 'idle') {
+          logToFile(`🛑 Global Escape key pressed in state "${appState}" -> resetting to idle and stopping speech!`);
+          resetState();
+          return;
+        }
+      }
+
+      // 2. Robust Alt detection across Windows key name variants
+      const isAltDown = !!(
+        down['LEFT ALT'] ||
+        down['RIGHT ALT'] ||
+        down['ALT'] ||
+        down['LALT'] ||
+        down['RALT'] ||
+        down['MENU'] ||
+        down['LEFT MENU'] ||
+        down['RIGHT MENU']
+      );
+
+      const eventKeyName = (e.name || e.rawKey?.name || '').toUpperCase();
+      const isKeyC = (eventKeyName === 'C' || eventKeyName === 'VK_C');
+      const isKeyF8 = (eventKeyName === 'F8' || eventKeyName === 'VK_F8');
+      const isKeyAlt = (eventKeyName.includes('ALT') || eventKeyName.includes('MENU'));
+
+      // Alt+C match: either C pressed while Alt is down, or Alt pressed while C is down
+      const isAltCPressed = (isKeyC && isAltDown) || (isKeyAlt && (down['C'] || down['VK_C']));
+      const isToggleTrigger = isAltCPressed || isKeyF8;
 
       if (e.state === 'DOWN') {
-        if (e.name === 'ESCAPE' || e.name === 'ESC') {
-          if (appState !== 'idle') {
-            logToFile(`🛑 Global Escape key pressed in state "${appState}" -> resetting to idle and stopping speech!`);
-            resetState();
+        if (isToggleTrigger) {
+          if (isToggleKeyHeld) {
+            // Key is held down -> OS auto-repeat event, ignore so it doesn't toggle repeatedly
             return;
           }
-        }
-        if (isAltCDown || isF8Down) {
-          if (appState === 'idle') {
-            pttDownTime = Date.now();
-            logToFile(`🎙️ Push-to-Talk down (${e.name}) -> starting live voice capture...`);
-            handleHotkeyPress();
-          }
+          isToggleKeyHeld = true;
+          logToFile(`🎙️ Voice toggle key pressed (${eventKeyName}) in state "${appState}"`);
+          handleHotkeyPress();
         }
       } else if (e.state === 'UP') {
-        const isTriggerKeyUp = (e.name === 'C' || e.name === 'F8' || e.name === 'LEFT ALT' || e.name === 'RIGHT ALT');
-        if (isTriggerKeyUp && pttDownTime > 0) {
-          const holdDuration = Date.now() - pttDownTime;
-          pttDownTime = 0;
-          if (holdDuration >= 350 && (appState === 'listening' || appState === 'dictating')) {
-            logToFile(`⚡ Push-to-Talk key released after ${holdDuration}ms -> instant 0ms silence cutoff!`);
-            if (appState === 'listening') {
-              appState = 'thinking';
-              overlayWindow?.webContents.send('state-change', 'thinking');
-              overlayWindow?.webContents.send('stop-recording');
-              activeLiveSttSession?.finishWithSilence();
-            } else if (appState === 'dictating') {
-              appState = 'transcribing_dictation';
-              overlayWindow?.webContents.send('state-change', 'transcribing_dictation');
-              overlayWindow?.webContents.send('stop-recording');
-              activeLiveSttSession?.finishWithSilence();
-            }
-          }
+        if (isKeyC || isKeyF8 || isKeyAlt) {
+          isToggleKeyHeld = false;
+          // IMPORTANT: Key release does NOT stop speaking!
+          // Speaking is toggle mode: Alt+C to talk, Alt+C again to end speaking.
         }
       }
     });
-    logToFile('⚡ Push-to-Talk global keyboard listener active (0ms release cutoff)');
+    logToFile('⚡ Voice Toggle global keyboard listener active (Alt+C / F8 toggle)');
   } catch (err) {
-    logToFile(`Push-to-Talk init notice: ${err.message}`);
+    logToFile(`Voice Toggle init notice: ${err.message}`);
   }
 }
 
@@ -458,10 +467,17 @@ function stopMouseTracking() {
   }
 }
 
-// ─── Handle the main hotkey press ────────────────────────────────────
+// ─── Handle the main hotkey press (Toggle: Alt+C to talk, Alt+C to end) ────
 async function handleHotkeyPress() {
+  const now = Date.now();
+  // Prevent rapid double triggers within 350ms
+  if (now - lastHotkeyTriggerTime < 350) {
+    return;
+  }
+  lastHotkeyTriggerTime = now;
+
   if (appState === 'listening') {
-    console.log('[Pointy] Stop listening requested');
+    logToFile('⏹️ Alt+C pressed again -> User ended speaking, processing question...');
     appState = 'thinking';
     overlayWindow?.webContents.send('state-change', 'thinking');
     overlayWindow?.webContents.send('stop-recording');
@@ -469,7 +485,10 @@ async function handleHotkeyPress() {
     return;
   }
 
-  if (appState !== 'idle') {
+  if (appState === 'pointing') {
+    logToFile('🎙️ Alt+C pressed during pointing -> Starting new voice question');
+    resetState();
+  } else if (appState !== 'idle') {
     resetState();
     return;
   }
@@ -521,12 +540,24 @@ async function handleHotkeyPress() {
 
 // ─── Voice Dictation Engine (Talk and Pointy Types into Active Window) ───
 async function handleDictationToggle() {
+  const now = Date.now();
+  if (now - lastDictationTriggerTime < 400) return;
+  lastDictationTriggerTime = now;
+
   if (appState === 'dictating') {
     console.log('[Pointy] ⏹️ Stopping dictation -> Transcribing...');
     appState = 'transcribing_dictation';
     overlayWindow?.webContents.send('state-change', 'transcribing_dictation');
     overlayWindow?.webContents.send('stop-recording');
     activeLiveSttSession?.finishWithSilence();
+
+    // Safety fallback: ensure dictation finishes within 1500ms even if no audio events fire
+    setTimeout(() => {
+      if (appState === 'transcribing_dictation' && !hasProcessedCurrentTurn) {
+        logToFile('⏰ Dictation finalize safety timer fired -> processing transcript');
+        processDictation(activeSttTranscript || '');
+      }
+    }, 1500);
     return;
   }
 
@@ -542,6 +573,7 @@ async function handleDictationToggle() {
   appState = 'dictating';
   hasProcessedCurrentTurn = false;
   activeSttTranscript = '';
+  let accumulatedDictationText = '';
   startMouseTracking();
   gnaniService?.prewarmSTT();
 
@@ -555,12 +587,19 @@ async function handleDictationToggle() {
         languageCode: 'en-IN',
         onTranscript: (text, isFinal) => {
           if (!text) return;
-          activeSttTranscript = text;
-          overlayWindow?.webContents.send('transcript', { text, lang: 'en-IN', isPartial: !isFinal });
-          if (isFinal && !hasProcessedCurrentTurn) {
-            hasProcessedCurrentTurn = true;
-            logToFile(`⚡ Final dictation live STT transcript: "${text}"`);
-            processDictation(text);
+          if (isFinal) {
+            accumulatedDictationText = (accumulatedDictationText ? accumulatedDictationText + ' ' : '') + text;
+            activeSttTranscript = accumulatedDictationText;
+            overlayWindow?.webContents.send('transcript', { text: accumulatedDictationText, lang: 'en-IN', isPartial: false });
+            // If user already pressed Alt+D to stop and we were waiting for silence flush:
+            if (appState === 'transcribing_dictation' && !hasProcessedCurrentTurn) {
+              logToFile(`⚡ Final dictation live STT transcript after silence flush: "${activeSttTranscript}"`);
+              processDictation(activeSttTranscript);
+            }
+          } else {
+            const currentFull = (accumulatedDictationText ? accumulatedDictationText + ' ' : '') + text;
+            activeSttTranscript = currentFull;
+            overlayWindow?.webContents.send('transcript', { text: currentFull, lang: 'en-IN', isPartial: true });
           }
         },
         onError: (err) => logToFile(`Live STT dictation notice: ${err.message}`),
@@ -577,6 +616,17 @@ async function handleDictationToggle() {
 
 // Process voice dictation audio or instant transcript and type directly into the user's active window
 async function processDictation(input) {
+  if (hasProcessedCurrentTurn) {
+    logToFile('⏭️ Dictation already processed for this session, skipping duplicate run');
+    return;
+  }
+  hasProcessedCurrentTurn = true;
+
+  if (activeLiveSttSession) {
+    try { activeLiveSttSession.close(); } catch (_) {}
+    activeLiveSttSession = null;
+  }
+
   const startTime = Date.now();
   try {
     appState = 'transcribing_dictation';
@@ -587,10 +637,13 @@ async function processDictation(input) {
     if (typeof input === 'string') {
       // ⚡ Path 1: Instant client-side Web Speech API transcript (0ms network STT latency!)
       transcript = input.trim();
-      logToFile(`⚡ Dictation: Instant transcript received from Web Speech: "${transcript}"`);
+      logToFile(`⚡ Dictation: Instant transcript received: "${transcript}"`);
     } else if (Buffer.isBuffer(input)) {
-      logToFile(`🎙️ Dictation: Transcribing voice buffer (${input.length} bytes) with Gnani Prisma STT...`);
-      if (gnaniService && gnaniService.hasApiKey()) {
+      if (activeSttTranscript && activeSttTranscript.trim()) {
+        transcript = activeSttTranscript.trim();
+        logToFile(`⚡ Dictation: Using live streamed transcript: "${transcript}"`);
+      } else if (gnaniService && gnaniService.hasApiKey()) {
+        logToFile(`🎙️ Dictation: Transcribing voice buffer (${input.length} bytes) with Gnani Prisma STT...`);
         const res = await gnaniService.transcribe(input);
         transcript = (res?.transcript || '').trim();
         logToFile(`🎯 Dictation transcribed via Gnani Prisma in ${Date.now() - startTime}ms: "${transcript}"`);
@@ -600,6 +653,15 @@ async function processDictation(input) {
     }
 
     transcript = transcript.trim();
+    if (!transcript && geminiService && geminiService.hasApiKey() && input && Buffer.isBuffer(input) && input.length > 2000) {
+      try {
+        logToFile('🔄 Dictation: attempting Gemini audio transcription fallback...');
+        const geminiStt = await geminiService.transcribeAudio(input);
+        transcript = (geminiStt?.transcript || '').trim();
+        if (transcript) logToFile(`⚡ Dictation: Gemini STT fallback succeeded: "${transcript}"`);
+      } catch (_) {}
+    }
+
     if (!transcript) {
       logToFile('⚠️ Dictation: No speech detected');
       overlayWindow?.webContents.send('dictation-result', { success: false, text: "No speech detected" });
@@ -980,8 +1042,21 @@ async function processQuestion(audioBuffer) {
       })(),
     ]);
 
-    const transcript = (sttResult?.transcript || '').trim();
-    const detectedLang = sttResult?.language || 'en-US';
+    let transcript = (sttResult?.transcript || '').trim();
+    let detectedLang = sttResult?.language || 'en-US';
+
+    // Fallback: If Gnani returned empty, attempt Gemini multimodal audio transcription
+    if (!transcript && geminiService && geminiService.hasApiKey() && audioBuffer && audioBuffer.length > 2000) {
+      try {
+        logToFile('🔄 Primary STT returned empty transcript, attempting Gemini audio transcription fallback...');
+        const geminiStt = await geminiService.transcribeAudio(audioBuffer);
+        transcript = (geminiStt?.transcript || '').trim();
+        detectedLang = geminiStt?.language || 'en-US';
+        if (transcript) logToFile(`⚡ Gemini STT fallback succeeded: "${transcript}"`);
+      } catch (geminiErr) {
+        logToFile(`Gemini STT fallback notice: ${geminiErr.message}`);
+      }
+    }
 
     if (!transcript) {
       logToFile('⚠️ No speech detected in audio stream');
@@ -1450,6 +1525,7 @@ function getDemoResponse(question) {
 
 // ─── Reset to idle state ─────────────────────────────────────────────
 function resetState() {
+  isToggleKeyHeld = false;
   currentTurnId++;
   disableEscapeHotkey();
   clearMultiStep();
@@ -1557,6 +1633,10 @@ function setupIPC() {
 
   // Receive instant client-side transcribed dictation text (0ms network delay)
   ipcMain.on('dictation-transcribed', async (event, text) => {
+    if (hasProcessedCurrentTurn) {
+      logToFile('⏭️ Turn already processed by live STT, skipping duplicate dictation-transcribed');
+      return;
+    }
     logToFile(`🎙️ Instant dictation transcript received: "${text}"`);
     await processDictation(text);
   });

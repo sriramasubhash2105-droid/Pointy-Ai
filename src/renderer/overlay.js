@@ -231,7 +231,13 @@ function setupIPCListeners() {
   });
 
   window.pointyAPI.onTranscript((data) => {
-    // Keep viewer's screen completely unobstructed
+    // Live visual feedback during voice dictation from Gnani streaming STT
+    if (currentState === 'dictating' && dictationStatusText && data?.text) {
+      const liveText = data.text.trim();
+      if (liveText) {
+        dictationStatusText.textContent = `🎙️ "${liveText.slice(-36)}"`;
+      }
+    }
   });
 
   window.pointyAPI.onPointAt((data) => {
@@ -445,7 +451,7 @@ function setupEventListeners() {
   let isMouseHoveringInteractive = false;
   window.addEventListener('mousemove', (event) => {
     const isInteractive = !!event.target.closest(
-      '#cursor-answer-card, #text-input-container, #research-progress-capsule, #research-dossier-card, button, input, .chat-turn, .code-copy-btn, .card-resize-handle'
+      '#dictation-card, #cursor-answer-card, #text-input-container, #research-progress-capsule, #research-dossier-card, button, input, .chat-turn, .code-copy-btn, .card-resize-handle'
     );
     if (isInteractive !== isMouseHoveringInteractive) {
       isMouseHoveringInteractive = isInteractive;
@@ -913,19 +919,19 @@ function setupSpeechRecognition() {
         if (dictationStatusText && fullSoFar) {
           dictationStatusText.textContent = `🎙️ "${fullSoFar.slice(-36)}"`;
         }
-        // Natural 1400ms pause timer for dictation
+        // Natural 3000ms pause timer for dictation
         if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
         speechSilenceTimer = setTimeout(() => {
           stopVoiceSession();
-        }, 1000);
+        }, 3000);
         return;
       }
 
-      // Auto-silence timer for voice questions
+      // Auto-silence fallback timer for voice questions (generous 4s so speaker can pause naturally)
       if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
       speechSilenceTimer = setTimeout(() => {
         stopVoiceSession();
-      }, 700);
+      }, 4000);
     };
 
     speechRecognizer.onerror = (e) => {
@@ -1076,6 +1082,9 @@ async function startVoiceSession() {
     // Runs on device — automatically detects speech start and silence end
     try {
       vadAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      if (vadAudioContext.state === 'suspended') {
+        vadAudioContext.resume().catch(() => {});
+      }
       const source = vadAudioContext.createMediaStreamSource(mediaStream);
 
       // Live Real-Time PCM Audio Streamer (2048 samples = 128ms frames at 16kHz)
@@ -1118,8 +1127,8 @@ async function startVoiceSession() {
         const avg = sum / dataArray.length;
 
         const isDictating = currentState === 'dictating';
-        const silenceThreshold = isDictating ? 1000 : 650;
-        const maxSessionDuration = isDictating ? 60000 : 8000;
+        const silenceThreshold = isDictating ? 3000 : 4000;
+        const maxSessionDuration = isDictating ? 60000 : 30000;
 
         // Visual indicator of microphone audio presence during dictation
         if (isDictating && dictationCard) {
@@ -2522,6 +2531,7 @@ function resetToStandby(options = {}) {
   }
 
   cursorAnswerCard.classList.add('hidden');
+  dictationCard?.classList.add('hidden');
   cursorLoadingSpinner?.classList.add('hidden');
   bubbleMultistepBar?.classList.add('hidden');
   activeMultiStepInfo = null;
