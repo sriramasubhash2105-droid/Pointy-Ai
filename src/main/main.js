@@ -89,6 +89,28 @@ let conversationManager = null;
 let mouseWatcherService = null;
 let actionService = null;
 let appState = 'idle'; // idle | listening | thinking | pointing
+let currentTurnId = 0;
+
+function enableEscapeHotkey() {
+  try {
+    if (!globalShortcut.isRegistered('Escape')) {
+      globalShortcut.register('Escape', () => {
+        logToFile('🛑 Escape triggered via globalShortcut -> resetState()');
+        resetState();
+      });
+    }
+  } catch (err) {
+    logToFile(`Escape hotkey registration notice: ${err.message}`);
+  }
+}
+
+function disableEscapeHotkey() {
+  try {
+    if (globalShortcut.isRegistered('Escape')) {
+      globalShortcut.unregister('Escape');
+    }
+  } catch (_) {}
+}
 
 // Live real-time STT & Push-to-Talk session tracking
 let activeLiveSttSession = null;
@@ -327,15 +349,8 @@ function registerHotkeys() {
     }
   });
 
-  try {
-    globalShortcut.register('Escape', () => {
-      console.log('[Pointy] 🔄 Escape key pressed');
-      resetState();
-    });
-    console.log('[Pointy] ✅ Registered hotkey: Escape');
-  } catch (e) {
-    console.warn('[Pointy] Notice: Escape hotkey registration:', e.message);
-  }
+  // Note: Escape hotkey is registered dynamically via enableEscapeHotkey() when active
+  // and caught system-wide via keyboardListener in setupPushToTalk()
 
   try {
     globalShortcut.register('Alt+T', () => {
@@ -373,6 +388,13 @@ function setupPushToTalk() {
       const isF8Down = (e.name === 'F8');
 
       if (e.state === 'DOWN') {
+        if (e.name === 'ESCAPE' || e.name === 'ESC') {
+          if (appState !== 'idle') {
+            logToFile(`🛑 Global Escape key pressed in state "${appState}" -> resetting to idle and stopping speech!`);
+            resetState();
+            return;
+          }
+        }
         if (isAltCDown || isF8Down) {
           if (appState === 'idle') {
             pttDownTime = Date.now();
@@ -460,6 +482,7 @@ async function handleHotkeyPress() {
   overlayWindow?.webContents.send('pop-out-cursor', cursorPoint);
 
   // Start listening and continuously follow user's original cursor!
+  enableEscapeHotkey();
   appState = 'listening';
   hasProcessedCurrentTurn = false;
   activeSttTranscript = '';
@@ -515,6 +538,7 @@ async function handleDictationToggle() {
   const cursorPoint = screen.getCursorScreenPoint();
   console.log(`[Pointy] 🎙️ Starting Voice Dictation at (${cursorPoint.x}, ${cursorPoint.y})`);
 
+  enableEscapeHotkey();
   appState = 'dictating';
   hasProcessedCurrentTurn = false;
   activeSttTranscript = '';
@@ -731,6 +755,7 @@ async function startDeepResearchWorkflow(action, language = 'en-US') {
   const activeConv = conversationManager ? conversationManager.getActiveConversation() : null;
 
   // 2. Announce immediately visually on screen
+  enableEscapeHotkey();
   appState = 'pointing';
   overlayWindow?.moveTop();
   overlayWindow?.webContents.send('state-change', 'pointing');
@@ -743,7 +768,9 @@ async function startDeepResearchWorkflow(action, language = 'en-US') {
 
   // Speak initial confirmation aloud via Gnani Timbre
   if (gnaniService && gnaniService.hasApiKey()) {
+    const researchTurnId = currentTurnId;
     gnaniService.speak(replyText, language).then((audioBase64) => {
+      if (currentTurnId !== researchTurnId || appState !== 'pointing') return;
       if (audioBase64 && appState === 'pointing') {
         overlayWindow?.webContents.send('play-audio', audioBase64);
       }
@@ -915,10 +942,13 @@ async function executeDesktopAction(action, question, language = 'en-US') {
 
   // 5. Synthesize speech concurrently in background and stream chunks as soon as ready!
   if (gnaniService && gnaniService.hasApiKey()) {
+    const actionTurnId = currentTurnId;
     gnaniService.speak(replyText, language, (chunkBase64, isFirst) => {
+      if (currentTurnId !== actionTurnId || appState !== 'pointing') return;
       if (isFirst) overlayWindow?.webContents.send('play-audio-start');
       overlayWindow?.webContents.send('play-audio-chunk', chunkBase64);
     }).then((audioBase64) => {
+      if (currentTurnId !== actionTurnId || appState !== 'pointing') return;
       overlayWindow?.webContents.send('play-audio-complete');
       if (audioBase64 && appState === 'pointing') {
         overlayWindow?.webContents.send('play-audio', audioBase64);
@@ -932,6 +962,7 @@ async function executeDesktopAction(action, question, language = 'en-US') {
 // ─── Process the user's voice question ───────────────────────────────
 async function processQuestion(audioBuffer) {
   try {
+    enableEscapeHotkey();
     appState = 'thinking';
     overlayWindow?.webContents.send('state-change', 'thinking');
 
@@ -991,6 +1022,7 @@ async function processQuestion(audioBuffer) {
 // ─── Process a typed question ────────────────────────────────────────
 async function processTypedQuestion(question) {
   try {
+    enableEscapeHotkey();
     appState = 'thinking';
     overlayWindow?.webContents.send('state-change', 'thinking');
 
@@ -1143,6 +1175,7 @@ async function advanceMultiStep() {
     }
 
     // 5. Point to the element on the newly updated screen IMMEDIATELY (0ms UI wait!)
+    enableEscapeHotkey();
     appState = 'pointing';
     overlayWindow?.moveTop();
     overlayWindow?.webContents.send('state-change', 'pointing');
@@ -1156,12 +1189,15 @@ async function advanceMultiStep() {
     // 6. Synthesize speech in parallel and stream audio chunks as soon as ready
     const spokenSentence = gnaniService ? gnaniService.extractFirstSentence(resultNext.reply) : resultNext.reply;
     if (spokenSentence && gnaniService && gnaniService.hasApiKey()) {
+      const stepTurnId = currentTurnId;
       gnaniService.speak(spokenSentence, resultNext.reply_lang || language, (chunkBase64, isFirst) => {
+        if (currentTurnId !== stepTurnId || appState !== 'pointing') return;
         if (isFirst) overlayWindow?.webContents.send('play-audio-start');
         overlayWindow?.webContents.send('play-audio-chunk', chunkBase64);
       }).then((audioBase64) => {
+        if (currentTurnId !== stepTurnId || appState !== 'pointing') return;
         overlayWindow?.webContents.send('play-audio-complete');
-        if (audioBase64) overlayWindow?.webContents.send('play-audio', audioBase64);
+        if (audioBase64 && appState === 'pointing') overlayWindow?.webContents.send('play-audio', audioBase64);
       }).catch((ttsErr) => {
         logToFile(`TTS step ${nextStepIndex} error: ${ttsErr.message}`);
       });
@@ -1289,12 +1325,15 @@ async function analyzeAndPoint(screenshotBuffer, question, language) {
   // 6. Synthesize speech in parallel and stream audio directly to overlay as chunks arrive
   if (textToSpeak && gnaniService && gnaniService.hasApiKey()) {
     logToFile(`🔊 Streaming TTS speech via Gnani Timbre (${isExplanation ? 'FULL DETAILED EXPLANATION' : 'Concise'}): "${textToSpeak.slice(0, 60)}..."`);
+    const pointTurnId = currentTurnId;
     gnaniService.speak(textToSpeak, result.reply_lang || language, (chunkBase64, isFirst) => {
+      if (currentTurnId !== pointTurnId || appState !== 'pointing') return;
       if (isFirst) overlayWindow?.webContents.send('play-audio-start');
       overlayWindow?.webContents.send('play-audio-chunk', chunkBase64);
     }).then((audioBase64) => {
+      if (currentTurnId !== pointTurnId || appState !== 'pointing') return;
       overlayWindow?.webContents.send('play-audio-complete');
-      if (audioBase64) {
+      if (audioBase64 && appState === 'pointing') {
         logToFile(`🔊 Gnani TTS complete (${audioBase64.length} bytes base64)`);
         overlayWindow?.webContents.send('play-audio', audioBase64);
       }
@@ -1411,6 +1450,8 @@ function getDemoResponse(question) {
 
 // ─── Reset to idle state ─────────────────────────────────────────────
 function resetState() {
+  currentTurnId++;
+  disableEscapeHotkey();
   clearMultiStep();
   if (activeLiveSttSession) {
     try { activeLiveSttSession.close(); } catch (_) {}
@@ -1419,9 +1460,10 @@ function resetState() {
   hasProcessedCurrentTurn = false;
   activeSttTranscript = '';
   gnaniService?.closePrewarmedSTT();
-    appState = 'idle';
+  appState = 'idle';
   startMouseTracking();
   overlayWindow?.webContents.send('state-change', 'idle');
+  overlayWindow?.webContents.send('play-audio-stop');
   overlayWindow?.webContents.send('reset');
 }
 

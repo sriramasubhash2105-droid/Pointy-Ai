@@ -260,6 +260,10 @@ function setupIPCListeners() {
   });
 
   window.pointyAPI.onPlayAudioStop?.(() => {
+    if (activeAudio) {
+      try { activeAudio.pause(); } catch (_) {}
+      activeAudio = null;
+    }
     streamingAudioPlayer.stop();
   });
 
@@ -273,12 +277,14 @@ function setupIPCListeners() {
     removeThinkingTurn();
     showAnswerBesideCursor(`⚠️ ${message}`, null);
     setTimeout(() => {
-      resetToStandby();
+      resetToStandby({ force: true, stopAudio: true });
     }, 4500);
   });
 
   window.pointyAPI.onReset(() => {
-    resetToStandby();
+    if (researchDossierCard) researchDossierCard.classList.add('hidden');
+    if (researchProgressCapsule) researchProgressCapsule.classList.add('hidden');
+    resetToStandby({ force: true, stopAudio: true });
   });
 
   // Voice Dictation events
@@ -588,6 +594,13 @@ function setupEventListeners() {
       e.preventDefault();
       e.stopPropagation();
       submitFollowUpQuestion();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      window.pointyAPI.requestReset();
+      if (researchDossierCard) researchDossierCard.classList.add('hidden');
+      if (researchProgressCapsule) researchProgressCapsule.classList.add('hidden');
+      resetToStandby({ force: true, stopAudio: true });
     }
   });
 
@@ -622,7 +635,13 @@ function setupEventListeners() {
   textSubmit.addEventListener('click', submitTypedQuestion);
   textInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitTypedQuestion();
-    if (e.key === 'Escape') hideTextInput();
+    if (e.key === 'Escape') {
+      hideTextInput();
+      window.pointyAPI.requestReset();
+      if (researchDossierCard) researchDossierCard.classList.add('hidden');
+      if (researchProgressCapsule) researchProgressCapsule.classList.add('hidden');
+      resetToStandby({ force: true, stopAudio: true });
+    }
   });
 
   // Global key navigation (Escape key returns to right bottom side of window)
@@ -631,7 +650,7 @@ function setupEventListeners() {
       window.pointyAPI.requestReset();
       if (researchDossierCard) researchDossierCard.classList.add('hidden');
       if (researchProgressCapsule) researchProgressCapsule.classList.add('hidden');
-      resetToStandby({ stopAudio: true });
+      resetToStandby({ force: true, stopAudio: true });
     }
   });
 }
@@ -2274,6 +2293,7 @@ class StreamingAudioPlayer {
     this.isFirstChunk = true;
     this.isPlaying = false;
     this.allChunksReceived = false;
+    this.isStopped = false;
   }
 
   ensureContext() {
@@ -2287,8 +2307,9 @@ class StreamingAudioPlayer {
   }
 
   start() {
+    this.isStopped = false;
     this.ensureContext();
-    this.stop();
+    this.stopSources();
     this.nextStartTime = this.audioCtx.currentTime + 0.04;
     this.isFirstChunk = true;
     this.isPlaying = true;
@@ -2297,7 +2318,7 @@ class StreamingAudioPlayer {
     if (speakingIndicator) speakingIndicator.style.opacity = '1';
   }
 
-  stop() {
+  stopSources() {
     for (const src of this.activeSources) {
       try { src.stop(); } catch (_) {}
     }
@@ -2309,6 +2330,11 @@ class StreamingAudioPlayer {
     if (this.audioCtx) {
       this.nextStartTime = this.audioCtx.currentTime;
     }
+  }
+
+  stop() {
+    this.isStopped = true;
+    this.stopSources();
   }
 
   markComplete() {
@@ -2335,7 +2361,7 @@ class StreamingAudioPlayer {
   }
 
   playChunk(chunkBase64) {
-    if (!chunkBase64) return;
+    if (!chunkBase64 || this.isStopped || currentState === 'idle') return;
     this.ensureContext();
 
     if (!this.isPlaying) {
@@ -2389,6 +2415,7 @@ const streamingAudioPlayer = new StreamingAudioPlayer();
 
 // ─── Gnani Timbre AI Audio Playback ───────────────────────────────────
 function playAudioBase64(base64, isChat = false) {
+  if (currentState === 'idle') return;
   // If streaming audio player is already playing chunks, avoid duplicate playback
   if (streamingAudioPlayer && (streamingAudioPlayer.isPlaying || streamingAudioPlayer.activeSources.length > 0)) {
     return;
@@ -2414,6 +2441,11 @@ function playAudioBase64(base64, isChat = false) {
 
     const speakingIndicator = document.querySelector('.answer-speaking-indicator');
     activeAudio.onplay = () => {
+      if (currentState === 'idle') {
+        try { activeAudio.pause(); } catch (_) {}
+        activeAudio = null;
+        return;
+      }
       cursorAnswerCard.classList.remove('hidden');
       if (speakingIndicator) speakingIndicator.style.opacity = '1';
     };
